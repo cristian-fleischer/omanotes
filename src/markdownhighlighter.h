@@ -39,7 +39,7 @@ public:
     //   bits 0-7   flag, Normal or InFencedCode
     //   bits 8-15  index into the languages seen in this document
     //   bits 16-23 the code highlighter's own state, for block comments
-    enum BlockState { Normal = 0, InFencedCode = 1, ThematicBreak = 2 };
+    enum BlockState { Normal = 0, InFencedCode = 1, ThematicBreak = 2, TableRow = 3 };
 
     static bool isFencedState(int state) {
         return state > 0 && (state & 0xff) == InFencedCode;
@@ -70,6 +70,14 @@ public:
     // A table row is styled as a unit, so anything that treats one differently
     // from prose asks here rather than keeping its own idea of the pattern.
     static bool isTableRow(const QString &text);
+
+    // The `|---|---|` row. It is scaffolding, so it is drawn as a rule
+    // rather than shown.
+    static bool isTableSeparator(const QString &text);
+
+    // Where a `*` list marker sits in the line, or -1. The asterisk is
+    // hidden and a bullet is drawn in its place.
+    static int asteriskBulletColumn(const QString &text);
 
     // The ``` or ~~~ row itself. It belongs to the code slab, not to the
     // prose around it.
@@ -140,6 +148,7 @@ private:
     QTextCharFormat m_tableFormat;
     QTextCharFormat m_tablePipeFormat;
     QTextCharFormat m_tableSeparatorFormat;
+    QTextCharFormat m_tableHeaderFormat;
     QTextCharFormat m_quoteFormat;
     QTextCharFormat m_linkFormat;
     QList<int> m_pendingSetextBlocks;

@@ -29,8 +29,9 @@ const QRegularExpression &tableSeparatorRe() {
 }
 
 const QRegularExpression &listRe() {
+    // indent, marker, space, then optionally the task box: `[`, its mark, `]`.
     static const QRegularExpression re(QStringLiteral(
-        "^(\\s*(?:[-+*]|\\d+[.)])\\s+)(?:(\\[)([ xX])(\\]\\s?))?"));
+        "^(\\s*)([-+*]|\\d+[.)])(\\s+)(?:(\\[)([ xX])(\\]\\s?))?"));
     return re;
 }
 
@@ -147,6 +148,17 @@ QString firstTilingMonospaceFamily() {
 
 bool MarkdownHighlighter::isTableRow(const QString &text) {
     return ::isTableRow(text);
+}
+
+int MarkdownHighlighter::asteriskBulletColumn(const QString &text) {
+    const QRegularExpressionMatch list = listRe().match(text);
+    if (!list.hasMatch() || list.captured(2) != QStringLiteral("*"))
+        return -1;
+    return int(list.capturedStart(2));
+}
+
+bool MarkdownHighlighter::isTableSeparator(const QString &text) {
+    return ::isTableRow(text) && tableSeparatorRe().match(text).hasMatch();
 }
 
 bool MarkdownHighlighter::isFenceLine(const QString &text) {
@@ -398,6 +410,9 @@ void MarkdownHighlighter::rebuildFormats() {
     m_tablePipeFormat.setForeground(marker);
     m_tableSeparatorFormat = m_tablePipeFormat;
 
+    m_tableHeaderFormat = m_tableFormat;
+    m_tableHeaderFormat.setFontWeight(QFont::Bold);
+
     m_quoteFormat = QTextCharFormat();
     m_quoteFormat.setForeground(quote);
     m_quoteFormat.setFontItalic(true);
@@ -467,14 +482,16 @@ void MarkdownHighlighter::highlightBlock(const QString &text) {
         return;
     }
 
-    bool thematicBreak = false;
-    if (!text.isEmpty() && !highlightTableRow(text)) {
-        thematicBreak = highlightMarkers(text);
-        highlightSetextContent(text);
-        highlightInline(text);
+    if (!text.isEmpty()) {
+        if (highlightTableRow(text)) {
+            applyBlockState(TableRow);
+        } else if (highlightMarkers(text)) {
+            applyBlockState(ThematicBreak);
+        } else {
+            highlightSetextContent(text);
+            highlightInline(text);
+        }
     }
-    if (thematicBreak)
-        applyBlockState(ThematicBreak);
 
     highlightSearch(text);
 }
@@ -564,8 +581,22 @@ bool MarkdownHighlighter::highlightTableRow(const QString &text) {
     if (!isTableRow(text))
         return false;
 
-    if (tableSeparatorRe().match(text).hasMatch()) {
-        setFormat(0, text.length(), m_tableSeparatorFormat);
+    const bool active = currentBlock().blockNumber() == m_activeBlock;
+
+    // The separator is scaffolding: it collapses and a rule is drawn where it
+    // was, unless the caret is on it.
+    if (isTableSeparator(text)) {
+        setFormat(0, text.length(), active ? m_tableSeparatorFormat : m_hiddenMarkerFormat);
+        return true;
+    }
+
+    // The row above a separator is the header.
+    if (isTableSeparator(currentBlock().next().text())) {
+        setFormat(0, text.length(), m_tableHeaderFormat);
+        for (int i = 0; i < text.length(); ++i) {
+            if (text.at(i) == QLatin1Char('|'))
+                setFormat(i, 1, m_tablePipeFormat);
+        }
         return true;
     }
 
@@ -629,15 +660,21 @@ bool MarkdownHighlighter::highlightMarkers(const QString &text) {
             || firstChar == QLatin1Char('*') || firstChar.isDigit()) {
         const QRegularExpressionMatch list = listRe().match(text);
         if (list.hasMatch()) {
-            setFormat(0, list.capturedLength(1), m_markerFormat);
+            setFormat(0, int(list.capturedEnd(3)), m_markerFormat);
+
+            // An asterisk bullet is drawn as a bullet, so the asterisk itself
+            // folds away. A dash or a plus is left as it was written.
+            if (!active && list.captured(2) == QStringLiteral("*"))
+                setFormat(int(list.capturedStart(2)), 1, m_hiddenMarkerFormat);
+
             // `- [ ]` and `- [x]`: brackets dim like the bullet, the mark bold
             // so a finished item reads at a glance.
-            if (list.capturedStart(2) >= 0) {
-                const bool done = list.captured(3).compare(QStringLiteral("x"),
+            if (list.capturedStart(4) >= 0) {
+                const bool done = list.captured(5).compare(QStringLiteral("x"),
                                                            Qt::CaseInsensitive) == 0;
-                setFormat(list.capturedStart(2), 1, m_markerFormat);
-                setFormat(list.capturedStart(3), 1, done ? m_boldFormat : m_markerFormat);
-                setFormat(list.capturedStart(4), list.capturedLength(4), m_markerFormat);
+                setFormat(list.capturedStart(4), 1, m_markerFormat);
+                setFormat(list.capturedStart(5), 1, done ? m_boldFormat : m_markerFormat);
+                setFormat(list.capturedStart(6), list.capturedLength(6), m_markerFormat);
             }
         }
     }

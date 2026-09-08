@@ -58,6 +58,8 @@ ApplicationWindow {
     // coordinates. Recomputed after layout, never during it.
     property var codeSlabs: []
     property var thematicRules: []
+    property var tableSlabs: []
+    property var bullets: []
 
     // Component.onDestruction runs after the window is hidden, when visibility
     // reads Hidden and the size is whatever it last grew to. Both have to be
@@ -170,6 +172,35 @@ ApplicationWindow {
             rules.push({ "y": Math.round(line.y + line.height / 2) });
         }
         win.thematicRules = rules;
+
+        var tables = [];
+        var regions = backend.tableRegions();
+        for (var t = 0; t < regions.length; ++t) {
+            var head = editor.positionToRectangle(regions[t].start);
+            var foot = editor.positionToRectangle(regions[t].end);
+            var rule = regions[t].separator >= 0
+                ? editor.positionToRectangle(regions[t].separator) : null;
+            var columns = [];
+            for (var c = 0; c < regions[t].columns.length; ++c) {
+                columns.push(Math.round(
+                    editor.positionToRectangle(regions[t].start + regions[t].columns[c]).x));
+            }
+            tables.push({
+                "y": head.y,
+                "height": foot.y + foot.height - head.y,
+                "ruleY": rule ? Math.round(rule.y + rule.height / 2) : -1,
+                "columns": columns
+            });
+        }
+        win.tableSlabs = tables;
+
+        var dots = [];
+        var marks = backend.asteriskBulletPositions();
+        for (var b = 0; b < marks.length; ++b) {
+            var cell = editor.positionToRectangle(marks[b]);
+            dots.push({ "x": cell.x, "y": cell.y, "height": cell.height });
+        }
+        win.bullets = dots;
     }
 
     function scheduleCodeSlabs() {
@@ -747,6 +778,65 @@ ApplicationWindow {
                     y: editor.y
                     width: editor.width
                     height: editor.height
+
+                    Repeater {
+                        model: win.bullets
+                        Text {
+                            x: modelData.x
+                            y: modelData.y
+                            height: modelData.height
+                            width: writerFontMetrics.averageCharacterWidth
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                            text: "\u2022"
+                            color: win.mutedColor
+                            font.pixelSize: win.editorFontPixelSize
+                        }
+                    }
+
+                    Repeater {
+                        model: win.tableSlabs
+                        Item {
+                            x: -win.scaledSize(10)
+                            width: codeSlabLayer.width + win.scaledSize(20)
+                            y: modelData.y - win.scaledSize(5)
+                            height: modelData.height + win.scaledSize(10)
+
+                            Rectangle {
+                                anchors.fill: parent
+                                radius: win.scaledSize(4)
+                                color: backend.themeCodeBackground
+                                opacity: 0.55
+                            }
+
+                            // One rule per column the whole table shares, drawn
+                            // behind the pipes so the breaks between rows close
+                            // up. A table whose source is not aligned shares no
+                            // column and keeps the pipes it was written with.
+                            Repeater {
+                                model: modelData.columns
+                                Rectangle {
+                                    x: modelData + win.scaledSize(10)
+                                    width: Math.max(1, Math.round(win.scaledSize(1)))
+                                    y: win.scaledSize(5)
+                                    height: parent.height - win.scaledSize(10)
+                                    color: win.mutedColor
+                                    opacity: 0.4
+                                }
+                            }
+
+                            // Where the |---|---| row was.
+                            Rectangle {
+                                visible: modelData.ruleY >= 0
+                                x: win.scaledSize(10)
+                                width: parent.width - win.scaledSize(20)
+                                y: modelData.ruleY - parent.y
+                                height: Math.max(1, Math.round(win.scaledSize(1)))
+                                color: win.mutedColor
+                                opacity: 0.5
+                            }
+                        }
+                    }
 
                     Repeater {
                         model: win.thematicRules

@@ -66,6 +66,43 @@ private slots:
     // under that note instead, and the sidebar marks it.
     // Fence rows and thematic breaks are punctuation, not content: they
     // collapse until the caret is in the block they belong to.
+    void tableRegionsShareOnlyAlignedColumns() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("tables.md"));
+        QFile seed(path);
+        QVERIFY(seed.open(QIODevice::WriteOnly));
+        seed.write("| a  | b  |\n"
+                   "|----|----|\n"
+                   "| 1  | 2  |\n"
+                   "\n"
+                   "| a | b |\n"
+                   "|---|---|\n"
+                   "| much longer | c |\n");
+        seed.close();
+
+        QQmlEngine engine;
+        QScopedPointer<QObject> editor(createEditor(&engine));
+        QVERIFY(editor);
+        Backend backend;
+        backend.attachDocument(editor->property("textDocument").value<QObject *>());
+        backend.open(QUrl::fromLocalFile(path));
+
+        const QVariantList regions = backend.tableRegions();
+        QCOMPARE(regions.size(), 2);
+
+        // Aligned source: every row has a pipe in the same three columns, so
+        // all three can be drawn as one continuous rule.
+        const QVariantMap aligned = regions.constFirst().toMap();
+        QCOMPARE(aligned.value(QStringLiteral("columns")).toList().size(), 3);
+        QVERIFY(aligned.value(QStringLiteral("separator")).toInt() >= 0);
+
+        // Ragged source shares only the columns that happen to line up, so
+        // nothing is drawn through a pipe that is not there.
+        const QVariantMap ragged = regions.at(1).toMap();
+        QVERIFY(ragged.value(QStringLiteral("columns")).toList().size() < 3);
+    }
+
     void markersRevealWhereTheCaretIs() {
         QTemporaryDir directory;
         QVERIFY(directory.isValid());
@@ -780,14 +817,24 @@ private slots:
                      families.toStringList());
         }
 
-        // Emphasis inside a cell is left as source, so the columns stay aligned.
-        QVERIFY(formatAt(document, 0, 6).fontWeight() != int(QFont::Bold));
+        // The row above the separator is the header, so it is bold as a whole.
+        QCOMPARE(formatAt(document, 0, 2).fontWeight(), int(QFont::Bold));
+
+        // Emphasis inside a body cell is left as source, so columns stay
+        // aligned, and no marker is hidden there either.
+        QVERIFY(formatAt(document, 2, 2).fontWeight() != int(QFont::Bold));
         QVERIFY(MarkdownHighlighter::inlineMarkup(row).isEmpty());
         QCOMPARE(formatAt(document, 3, 8).fontWeight(), int(QFont::Bold));
 
-        // Pipes and the separator row are dimmed away from the content.
+        // The separator collapses; a rule is drawn where it was.
+        QVERIFY(MarkdownHighlighter::isTableSeparator(
+            document.findBlockByNumber(1).text()));
+        QCOMPARE(formatAt(document, 1, 1).fontPointSize(), 1.0);
+        QCOMPARE(document.findBlockByNumber(0).userState(),
+                 int(MarkdownHighlighter::TableRow));
+
+        // Pipes are dimmed away from the content.
         QVERIFY(formatAt(document, 0, 0).foreground() != formatAt(document, 0, 2).foreground());
-        QCOMPARE(formatAt(document, 1, 1).foreground(), formatAt(document, 0, 0).foreground());
     }
 
     void taskItemFormats() {

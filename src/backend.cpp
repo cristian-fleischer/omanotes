@@ -617,6 +617,85 @@ QList<int> Backend::thematicBreakPositions() const {
     return positions;
 }
 
+QList<int> Backend::asteriskBulletPositions() const {
+    QList<int> positions;
+    if (!m_document)
+        return positions;
+    for (QTextBlock block = m_document->begin(); block.isValid(); block = block.next()) {
+        if (MarkdownHighlighter::isFencedState(block.userState()))
+            continue;
+        const int column = MarkdownHighlighter::asteriskBulletColumn(block.text());
+        if (column >= 0)
+            positions.append(block.position() + column);
+    }
+    return positions;
+}
+
+QVariantList Backend::tableRegions() const {
+    QVariantList regions;
+    if (!m_document)
+        return regions;
+
+    QTextBlock first;
+    QTextBlock previous;
+    int separator = -1;
+
+    // Character columns holding a pipe in every row of the run. Only those can
+    // be drawn as one continuous rule; a table whose source is not aligned has
+    // none in common and keeps the pipes it was written with.
+    QList<int> shared;
+    bool firstRow = true;
+
+    const auto flush = [&]() {
+        if (!first.isValid())
+            return;
+        QVariantList columns;
+        for (int column : std::as_const(shared))
+            columns.append(column);
+        regions.append(QVariantMap{{QStringLiteral("start"), first.position()},
+                                   {QStringLiteral("end"), previous.position()},
+                                   {QStringLiteral("separator"), separator},
+                                   {QStringLiteral("columns"), columns}});
+        first = QTextBlock();
+        separator = -1;
+        shared.clear();
+        firstRow = true;
+    };
+
+    for (QTextBlock block = m_document->begin(); block.isValid(); block = block.next()) {
+        if (block.userState() == MarkdownHighlighter::TableRow) {
+            if (!first.isValid())
+                first = block;
+            if (separator < 0 && MarkdownHighlighter::isTableSeparator(block.text()))
+                separator = block.position();
+
+            const QString row = block.text();
+            QList<int> pipes;
+            for (int i = 0; i < row.length(); ++i) {
+                if (row.at(i) == QLatin1Char('|'))
+                    pipes.append(i);
+            }
+            if (firstRow) {
+                shared = pipes;
+                firstRow = false;
+            } else {
+                QList<int> kept;
+                for (int column : std::as_const(shared)) {
+                    if (pipes.contains(column))
+                        kept.append(column);
+                }
+                shared = kept;
+            }
+
+            previous = block;
+            continue;
+        }
+        flush();
+    }
+    flush();
+    return regions;
+}
+
 void Backend::setCursorPosition(int position) {
     if (!m_document || !m_highlighter)
         return;

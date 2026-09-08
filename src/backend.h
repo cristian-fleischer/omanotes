@@ -109,6 +109,11 @@ public:
     Q_INVOKABLE QVariantList fencedCodeRegions() const;
     // Document position of each thematic break, so QML can draw the rule.
     Q_INVOKABLE QList<int> thematicBreakPositions() const;
+    // One entry per run of table rows: where it starts and ends, and where
+    // its separator row sits so a rule can be drawn there.
+    Q_INVOKABLE QVariantList tableRegions() const;
+    // Document position of each hidden `*` list marker.
+    Q_INVOKABLE QList<int> asteriskBulletPositions() const;
     // The caret's block shows its markers as written.
     Q_INVOKABLE void setCursorPosition(int position);
     Q_INVOKABLE QVariantMap viewState() const;
