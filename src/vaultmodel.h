@@ -58,6 +58,11 @@ public:
     Q_INVOKABLE QString pathAt(int row) const;
     Q_INVOKABLE int rowForPath(const QString &path) const;
     Q_INVOKABLE QString createNote();
+    // QML has no QUrl::fromLocalFile, and string-splicing a file:// URL
+    // loses every path that contains a space or a percent sign.
+    Q_INVOKABLE QUrl urlForPath(const QString &path) const;
+    Q_INVOKABLE void setRootUrl(const QUrl &url);
+    Q_INVOKABLE void setCurrentUrl(const QUrl &url);
 
     // Reads vault/root and vault/sortMode. Called from main(), never from the
     // constructor: a test that builds a VaultModel must not scan the real vault.

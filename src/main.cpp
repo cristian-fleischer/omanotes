@@ -12,6 +12,7 @@
 
 #include "backend.h"
 #include "systemtheme.h"
+#include "vaultmodel.h"
 
 int main(int argc, char *argv[]) {
     QApplication app(argc, argv);
@@ -31,6 +32,10 @@ int main(int argc, char *argv[]) {
     QQuickStyle::setStyle(QStringLiteral("Material"));
 
     Backend backend(&app);
+    VaultModel vault(&app);
+    // The root comes from settings, never from a path baked into the binary.
+    vault.loadSettings();
+
     SystemTheme systemTheme(&app);
     backend.setDarkMode(systemTheme.darkMode());
     QObject::connect(&systemTheme, &SystemTheme::darkModeChanged, &backend,
@@ -63,6 +68,7 @@ int main(int argc, char *argv[]) {
             qWarning().noquote() << warning.toString();
     });
     engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+    engine.rootContext()->setContextProperty(QStringLiteral("vault"), &vault);
 
     engine.load(QUrl(QStringLiteral("qrc:/Main.qml")));
     if (engine.rootObjects().isEmpty()) {

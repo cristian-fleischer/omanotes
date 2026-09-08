@@ -84,8 +84,14 @@ void VaultModel::setSortMode(const QString &sortMode) {
 }
 
 void VaultModel::setCurrentPath(const QString &currentPath) {
-    const QString cleaned = currentPath.isEmpty() ? currentPath
-                                                  : QDir::cleanPath(currentPath);
+    // Entries hold canonical paths. A file opened through the portal dialog can
+    // arrive by a different route to the same note, so resolve before comparing.
+    QString cleaned;
+    if (!currentPath.isEmpty()) {
+        cleaned = QFileInfo(currentPath).canonicalFilePath();
+        if (cleaned.isEmpty())
+            cleaned = QDir::cleanPath(currentPath);
+    }
     if (m_currentPath == cleaned)
         return;
 
@@ -133,6 +139,19 @@ QHash<int, QByteArray> VaultModel::roleNames() const {
 QUrl VaultModel::urlAt(int row) const {
     const QString path = pathAt(row);
     return path.isEmpty() ? QUrl() : QUrl::fromLocalFile(path);
+}
+
+QUrl VaultModel::urlForPath(const QString &path) const {
+    return path.isEmpty() ? QUrl() : QUrl::fromLocalFile(path);
+}
+
+void VaultModel::setRootUrl(const QUrl &url) {
+    if (url.isLocalFile())
+        setRoot(url.toLocalFile());
+}
+
+void VaultModel::setCurrentUrl(const QUrl &url) {
+    setCurrentPath(url.isLocalFile() ? url.toLocalFile() : QString());
 }
 
 QString VaultModel::pathAt(int row) const {

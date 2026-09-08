@@ -404,6 +404,20 @@ void Backend::openExternalUrl(const QUrl &url) {
         QDesktopServices::openUrl(url);
 }
 
+QVariantMap Backend::sidebarState() const {
+    QSettings settings;
+    return {{QStringLiteral("visible"),
+             settings.value(QStringLiteral("vault/sidebarVisible"), true)},
+            {QStringLiteral("width"),
+             settings.value(QStringLiteral("vault/sidebarWidth"), 260)}};
+}
+
+void Backend::saveSidebarState(bool visible, int width) {
+    QSettings settings;
+    settings.setValue(QStringLiteral("vault/sidebarVisible"), visible);
+    settings.setValue(QStringLiteral("vault/sidebarWidth"), width);
+}
+
 QVariantMap Backend::windowGeometry() const {
     QSettings settings;
     return {{QStringLiteral("x"), settings.value(QStringLiteral("window/x"), -1)},

@@ -133,6 +133,69 @@ private slots:
         QTRY_COMPARE_WITH_TIMEOUT(model.count(), 4, 3000);
     }
 
+    void vaultSidebarOpensNotes() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        QTemporaryDir vaultDirectory;
+        QVERIFY(vaultDirectory.isValid());
+        QVERIFY(writeNote(vaultDirectory.path(), QStringLiteral("Fusion reactor.md")));
+        QVERIFY(writeNote(vaultDirectory.path(), QStringLiteral("Groceries.md")));
+        QVERIFY(writeNote(vaultDirectory.path(), QStringLiteral("projects/Roadmap.md")));
+
+        Backend backend;
+        VaultModel vault;
+        vault.setRoot(vaultDirectory.path());
+        QCOMPARE(vault.count(), 3);
+
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        engine.rootContext()->setContextProperty(QStringLiteral("vault"), &vault);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        QObject *sidebar = window->findChild<QObject *>(QStringLiteral("vaultSidebar"));
+        QObject *list = window->findChild<QObject *>(QStringLiteral("vaultList"));
+        QObject *filterField = window->findChild<QObject *>(QStringLiteral("vaultFilter"));
+        QVERIFY(sidebar);
+        QVERIFY(list);
+        QVERIFY(filterField);
+        QCOMPARE(list->property("count").toInt(), 3);
+
+        // The filter field drives the model. QML keeps no second copy of the list.
+        filterField->setProperty("text", QStringLiteral("fusion"));
+        QCOMPARE(vault.filter(), QStringLiteral("fusion"));
+        QCOMPARE(list->property("count").toInt(), 1);
+
+        // Enter opens the selection, and it goes through Backend::open.
+        QVERIFY(QMetaObject::invokeMethod(sidebar, "activateSelection"));
+        QCOMPARE(backend.fileUrl(), vault.urlAt(0));
+        QCOMPARE(QFileInfo(backend.fileUrl().toLocalFile()).fileName(),
+                 QStringLiteral("Fusion reactor.md"));
+        QCOMPARE(vault.currentPath(), backend.fileUrl().toLocalFile());
+
+        filterField->setProperty("text", QString());
+        QCOMPARE(list->property("count").toInt(), 3);
+
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "toggleSidebar"));
+        QCOMPARE(window->property("sidebarVisible").toBool(), false);
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "toggleSidebar"));
+        QCOMPARE(window->property("sidebarVisible").toBool(), true);
+
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "createNote"));
+        QCOMPARE(QFileInfo(backend.fileUrl().toLocalFile()).fileName(),
+                 QStringLiteral("untitled.md"));
+        QCOMPARE(list->property("count").toInt(), 4);
+
+        // Sidebar width and visibility outlive the window.
+        backend.saveSidebarState(false, 320);
+        const QVariantMap state = backend.sidebarState();
+        QCOMPARE(state.value(QStringLiteral("visible")).toBool(), false);
+        QCOMPARE(state.value(QStringLiteral("width")).toInt(), 320);
+    }
+
     void preservesLineEndingsAndByteOrderMark() {
         Backend::LineEnding ending = Backend::LineEnding::Lf;
         bool byteOrderMark = false;
@@ -404,8 +467,10 @@ private slots:
         QVERIFY(!mainQmlPath.isEmpty());
 
         Backend backend;
+        VaultModel vault;
         QQmlEngine engine;
         engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        engine.rootContext()->setContextProperty(QStringLiteral("vault"), &vault);
         QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
         QVERIFY2(component.isReady(), qPrintable(component.errorString()));
         QScopedPointer<QObject> window(component.create());
@@ -434,8 +499,10 @@ private slots:
         QVERIFY(!mainQmlPath.isEmpty());
 
         Backend backend;
+        VaultModel vault;
         QQmlEngine engine;
         engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        engine.rootContext()->setContextProperty(QStringLiteral("vault"), &vault);
         QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
         QVERIFY2(component.isReady(), qPrintable(component.errorString()));
         QScopedPointer<QObject> window(component.create());
