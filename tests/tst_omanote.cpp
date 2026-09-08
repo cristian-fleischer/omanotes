@@ -4,6 +4,7 @@
 #include <QTextDocument>
 #include <QTextLayout>
 #include <QFontDatabase>
+#include <QQuickTextDocument>
 #include <QWindow>
 #include <QQmlComponent>
 #include <QQmlContext>
@@ -192,6 +193,62 @@ private slots:
 
     // visibility reads Hidden by the time the window is torn down, so the state
     // to restore is the one recorded while it was still on screen.
+    // Line height is a block property, so it is the one part of the styling
+    // QSyntaxHighlighter cannot set. Backend reads the block's kind instead.
+    void lineHeightPerBlockKind() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("kinds.md"));
+        QFile seed(path);
+        QVERIFY(seed.open(QIODevice::WriteOnly));
+        seed.write("prose line\n"
+                   "\n"
+                   "| a | b |\n"
+                   "|---|---|\n"
+                   "\n"
+                   "```sh\n"
+                   "ls *.md\n"
+                   "```\n");
+        seed.close();
+
+        QQmlEngine engine;
+        QScopedPointer<QObject> editor(createEditor(&engine));
+        QVERIFY(editor);
+        Backend backend;
+        backend.attachDocument(editor->property("textDocument").value<QObject *>());
+        backend.open(QUrl::fromLocalFile(path));
+
+        QTextDocument *document =
+            qobject_cast<QQuickTextDocument *>(
+                editor->property("textDocument").value<QObject *>())->textDocument();
+        QVERIFY(document);
+
+        const auto lineHeight = [document](int blockNumber) {
+            return document->findBlockByNumber(blockNumber).blockFormat().lineHeight();
+        };
+
+        QCOMPARE(lineHeight(0), 140.0);  // prose
+        QCOMPARE(lineHeight(2), 120.0);  // table row
+        QCOMPARE(lineHeight(3), 120.0);  // separator row
+        QCOMPARE(lineHeight(5), 125.0);  // opening fence
+        QCOMPARE(lineHeight(6), 125.0);  // code
+        QCOMPARE(lineHeight(7), 125.0);  // closing fence
+
+        // Opening a fence at the top restates every line under it. The changed
+        // range covers one block; the rest come from the highlighter.
+        QVERIFY(QMetaObject::invokeMethod(editor.data(), "insert", Q_ARG(int, 0),
+                                          Q_ARG(QString, QStringLiteral("```\n"))));
+        backend.editorTextChanged();
+        QCOMPARE(lineHeight(1), 125.0);  // "prose line" is inside the fence now
+        QCOMPARE(lineHeight(3), 125.0);  // and so is the table
+
+        // Undoing puts both the text and the line heights back.
+        QVERIFY(QMetaObject::invokeMethod(editor.data(), "undo"));
+        backend.editorTextChanged();
+        QCOMPARE(lineHeight(0), 140.0);
+        QCOMPARE(lineHeight(2), 120.0);
+    }
+
     void keepsWindowStateAcrossRuns() {
         const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
         QVERIFY(!mainQmlPath.isEmpty());

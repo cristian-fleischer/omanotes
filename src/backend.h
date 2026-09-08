@@ -11,6 +11,8 @@
 #include <memory>
 
 class MarkdownHighlighter;
+class QTextBlock;
+class QTextCursor;
 class QTextDocument;
 class QWindow;
 class QLockFile;
@@ -125,6 +127,9 @@ private:
     void scheduleWordCount();
     void applyDocumentTypography();
     void reapplyTypographyToChange();
+    qreal lineHeightForBlock(const QTextBlock &block) const;
+    bool hasWantedLineHeight(const QTextBlock &block) const;
+    void applyBlockTypography(QTextCursor &cursor, const QTextBlock &block);
     void scheduleRecovery();
     void writeRecovery();
     void restoreRecovery();
@@ -144,6 +149,10 @@ private:
     bool m_closeAfterSave = false;
     bool m_formattingTypography = false;
     int m_formattedBlockCount = 0;
+    // Percentages of the line's own font size, from settings.
+    qreal m_lineHeight = 140;
+    qreal m_codeLineHeight = 125;
+    qreal m_tableLineHeight = 120;
     int m_lastChangePos = 0;
     int m_lastChangeAdded = 0;
     QTimer m_wordCountTimer;

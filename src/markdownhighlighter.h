@@ -42,6 +42,19 @@ public:
     static QList<InlineMarkup> inlineMarkup(const QString &text,
                                             bool insideFencedCode = false);
 
+    // A table row is styled as a unit, so anything that treats one differently
+    // from prose asks here rather than keeping its own idea of the pattern.
+    static bool isTableRow(const QString &text);
+
+    // The ``` or ~~~ row itself. It belongs to the code slab, not to the
+    // prose around it.
+    static bool isFenceLine(const QString &text);
+
+    // Block numbers whose fence state changed in the last pass, and clears the
+    // list. Opening a fence restates every line under it, and nothing else can
+    // tell which those were.
+    QList<int> takeRestatedBlocks();
+
 protected:
     void highlightBlock(const QString &text) override;
 
@@ -57,6 +70,7 @@ private:
     void highlightInline(const QString &text);
     void highlightSearch(const QString &text);
     void scheduleSetextRefresh(int blockNumber);
+    void applyBlockState(int state);
 
     bool m_darkMode = true;
     QString m_customBackground;
@@ -79,6 +93,7 @@ private:
     QTextCharFormat m_quoteFormat;
     QTextCharFormat m_linkFormat;
     QList<int> m_pendingSetextBlocks;
+    QList<int> m_restatedBlocks;
     QString m_searchQuery;
     int m_currentMatchStart = -1;
     QTextCharFormat m_searchFormat;

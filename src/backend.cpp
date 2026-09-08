@@ -34,7 +34,12 @@
 
 #include "markdownhighlighter.h"
 
-constexpr qreal typoraLineHeightPercent = 140;
+// Percentages of the line's own font size. Prose gets Typora's 140; code and
+// tables are set tighter so a fenced block reads as one slab and a table as a
+// grid. All three are settings, because the right answer depends on the font.
+constexpr qreal defaultLineHeightPercent = 140;
+constexpr qreal defaultCodeLineHeightPercent = 125;
+constexpr qreal defaultTableLineHeightPercent = 120;
 const QString lastSaveDirectorySetting = QStringLiteral("file/lastSaveDirectory");
 
 QString Backend::normalizedLinkUrl(const QString &clipboardText) {
@@ -117,6 +122,14 @@ Backend::Backend(QObject *parent) : QObject(parent) {
 
                 emit externalChangeDetected(deleted, m_modified);
             });
+
+    QSettings settings;
+    m_lineHeight = settings.value(QStringLiteral("typography/lineHeight"),
+                                  defaultLineHeightPercent).toDouble();
+    m_codeLineHeight = settings.value(QStringLiteral("typography/codeLineHeight"),
+                                      defaultCodeLineHeightPercent).toDouble();
+    m_tableLineHeight = settings.value(QStringLiteral("typography/tableLineHeight"),
+                                       defaultTableLineHeightPercent).toDouble();
 
     loadOmarchyTheme();
     watchOmarchyTheme();
@@ -359,10 +372,10 @@ bool Backend::editorTextChanged() {
     m_lastDocumentText = text;
 
     if (m_document) {
-        const int blockCount = m_document->blockCount();
-        if (blockCount > m_formattedBlockCount)
-            reapplyTypographyToChange();
-        m_formattedBlockCount = blockCount;
+        // Not only when blocks are added: typing a pipe turns a prose line into
+        // a table row, which wants a different line height at the same count.
+        reapplyTypographyToChange();
+        m_formattedBlockCount = m_document->blockCount();
     }
 
     scheduleWordCount();
@@ -862,12 +875,33 @@ void Backend::scheduleWordCount() {
     m_wordCountTimer.start();
 }
 
+// Line height is a block property, so it is the one part of the styling the
+// highlighter cannot do: QSyntaxHighlighter only sets character formats.
+qreal Backend::lineHeightForBlock(const QTextBlock &block) const {
+    if (block.userState() == MarkdownHighlighter::InFencedCode
+            || MarkdownHighlighter::isFenceLine(block.text()))
+        return m_codeLineHeight;
+    if (MarkdownHighlighter::isTableRow(block.text()))
+        return m_tableLineHeight;
+    return m_lineHeight;
+}
+
+bool Backend::hasWantedLineHeight(const QTextBlock &block) const {
+    const QTextBlockFormat format = block.blockFormat();
+    return format.lineHeightType() == QTextBlockFormat::ProportionalHeight
+        && qFuzzyCompare(format.lineHeight(), lineHeightForBlock(block));
+}
+
+void Backend::applyBlockTypography(QTextCursor &cursor, const QTextBlock &block) {
+    QTextBlockFormat blockFormat;
+    blockFormat.setLineHeight(lineHeightForBlock(block), QTextBlockFormat::ProportionalHeight);
+    cursor.setPosition(block.position());
+    cursor.mergeBlockFormat(blockFormat);
+}
+
 void Backend::applyDocumentTypography() {
     if (!m_document)
         return;
-
-    QTextBlockFormat blockFormat;
-    blockFormat.setLineHeight(typoraLineHeightPercent, QTextBlockFormat::ProportionalHeight);
 
     // A full pass is only used for freshly loaded/attached documents, so it is
     // safe to drop undo history here (re-enabling clears the stack anyway).
@@ -876,8 +910,8 @@ void Backend::applyDocumentTypography() {
 
     m_formattingTypography = true;
     QTextCursor cursor(m_document);
-    cursor.select(QTextCursor::Document);
-    cursor.mergeBlockFormat(blockFormat);
+    for (QTextBlock block = m_document->begin(); block.isValid(); block = block.next())
+        applyBlockTypography(cursor, block);
     m_formattingTypography = false;
 
     m_document->setUndoRedoEnabled(undoEnabled);
@@ -889,22 +923,46 @@ void Backend::reapplyTypographyToChange() {
     if (!m_document)
         return;
 
-    QTextBlockFormat blockFormat;
-    blockFormat.setLineHeight(typoraLineHeightPercent, QTextBlockFormat::ProportionalHeight);
-
-    // Format only the block(s) touched by the last edit instead of the whole
-    // document, and fold the change into the preceding edit command so a single
-    // undo reverts both the text and its formatting.
     const int maxPos = m_document->characterCount() - 1;
     const int start = qBound(0, m_lastChangePos, maxPos);
     const int end = qBound(start, m_lastChangePos + m_lastChangeAdded, maxPos);
 
+    QList<QTextBlock> touched;
+    const QTextBlock lastChanged = m_document->findBlock(end);
+    for (QTextBlock block = m_document->findBlock(start); block.isValid();
+            block = block.next()) {
+        touched.append(block);
+        if (block == lastChanged)
+            break;
+    }
+
+    // Opening or closing a fence restates every line under it. The highlighter
+    // is the only thing that knows which, so drain its list even when nothing
+    // else needs doing.
+    if (m_highlighter) {
+        const QList<int> restated = m_highlighter->takeRestatedBlocks();
+        for (int number : restated) {
+            const QTextBlock block = m_document->findBlockByNumber(number);
+            if (block.isValid())
+                touched.append(block);
+        }
+    }
+
+    QList<QTextBlock> stale;
+    for (const QTextBlock &block : std::as_const(touched)) {
+        if (!hasWantedLineHeight(block))
+            stale.append(block);
+    }
+    if (stale.isEmpty())
+        return;
+
     m_formattingTypography = true;
     QTextCursor cursor(m_document);
+    // Fold the formatting into the edit that caused it, so a single undo
+    // reverts both the text and its line height.
     cursor.joinPreviousEditBlock();
-    cursor.setPosition(start);
-    cursor.setPosition(end, QTextCursor::KeepAnchor);
-    cursor.mergeBlockFormat(blockFormat);
+    for (const QTextBlock &block : std::as_const(stale))
+        applyBlockTypography(cursor, block);
     cursor.endEditBlock();
     m_formattingTypography = false;
 }

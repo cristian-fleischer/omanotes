@@ -66,6 +66,29 @@ bool isParagraphLine(const QString &line) {
 
 } // namespace
 
+bool MarkdownHighlighter::isTableRow(const QString &text) {
+    return ::isTableRow(text);
+}
+
+bool MarkdownHighlighter::isFenceLine(const QString &text) {
+    return ::isFenceLine(text);
+}
+
+QList<int> MarkdownHighlighter::takeRestatedBlocks() {
+    const QList<int> blocks = m_restatedBlocks;
+    m_restatedBlocks.clear();
+    return blocks;
+}
+
+// setCurrentBlockState, remembering which blocks it actually moved. A brand-new
+// block reports -1, which is Normal as far as anything downstream cares.
+void MarkdownHighlighter::applyBlockState(int state) {
+    const int previous = currentBlock().userState();
+    if ((previous < 0 ? int(Normal) : previous) != state)
+        m_restatedBlocks.append(currentBlock().blockNumber());
+    setCurrentBlockState(state);
+}
+
 MarkdownHighlighter::MarkdownHighlighter(QTextDocument *document)
     : QSyntaxHighlighter(document) {
     rebuildFormats();
@@ -247,11 +270,11 @@ bool MarkdownHighlighter::highlightFencedCode(const QString &text) {
     const bool onFenceLine = isFenceLine(text);
 
     if (!wasInside && !onFenceLine) {
-        setCurrentBlockState(Normal);
+        applyBlockState(Normal);
         return false;
     }
 
-    setCurrentBlockState(wasInside && onFenceLine ? Normal : InFencedCode);
+    applyBlockState(wasInside && onFenceLine ? Normal : InFencedCode);
     // The fence rows and the language tag stay dim; the code between them takes
     // the block background. An empty line inside a fence has no characters to
     // paint, so the background breaks there.
