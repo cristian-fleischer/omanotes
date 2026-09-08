@@ -3,6 +3,7 @@
 #include <QTextBlock>
 #include <QTextDocument>
 #include <QTextLayout>
+#include <QTextLine>
 #include <QColor>
 #include <QFontDatabase>
 #include <QQuickTextDocument>
@@ -915,6 +916,37 @@ private slots:
 
         // Pipes are dimmed away from the content.
         QVERIFY(formatAt(document, 0, 0).foreground() != formatAt(document, 0, 2).foreground());
+    }
+
+    // A hidden marker cancels its own advance, which is right for `**` but
+    // wrong for a list bullet: it dragged the label a cell to the left and the
+    // asterisk items no longer lined up with the dash ones.
+    void asteriskBulletKeepsItsCell() {
+        QTextDocument document;
+        document.setDefaultFont(bodyFont());
+        MarkdownHighlighter highlighter(&document);
+        setDocumentText(document, QStringLiteral("- item\n* item\n+ item"));
+
+        const auto lineWidth = [&document](int line) {
+            return document.findBlockByNumber(line).layout()->lineAt(0).naturalTextWidth();
+        };
+        // Same text, same width: the asterisk still occupies its cell.
+        QCOMPARE(lineWidth(1), lineWidth(0));
+        QCOMPARE(lineWidth(2), lineWidth(0));
+
+        // It paints nothing, though, so the drawn dot is all you see.
+        const QTextCharFormat marker = formatAt(document, 1, 0);
+        QCOMPARE(marker.foreground().color(), QColor(QStringLiteral("#101010")));
+        QVERIFY(!marker.hasProperty(QTextFormat::FontLetterSpacing));
+        QCOMPARE(marker.fontPointSize(), 0.0);
+
+        // A dash is left exactly as written.
+        QVERIFY(formatAt(document, 0, 0).foreground().color()
+                != QColor(QStringLiteral("#101010")));
+
+        QCOMPARE(MarkdownHighlighter::asteriskBulletColumn(QStringLiteral("* item")), 0);
+        QCOMPARE(MarkdownHighlighter::asteriskBulletColumn(QStringLiteral("  * item")), 2);
+        QCOMPARE(MarkdownHighlighter::asteriskBulletColumn(QStringLiteral("- item")), -1);
     }
 
     void taskItemFormats() {
