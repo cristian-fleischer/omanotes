@@ -7,6 +7,12 @@ browser engine. Qt 6 and about 600 KB.
 The buffer always holds your exact Markdown. Styling is applied over the source,
 never a conversion, and saving writes the bytes you see back unchanged.
 
+![OmaNote showing headings, lists, tasks, a table, syntax-highlighted code and a
+box-drawing diagram](docs/omanote.png)
+
+That note is `contrib/showcase.md`. Open it to see what the editor draws over
+plain Markdown.
+
 Fork of [omawrite](https://github.com/omacom/omawrite) by David Heinemeier
 Hansson, MIT. The editing surface, autosave, atomic writes, crash recovery,
 portal dialogs and theme following all come from there. What OmaNote adds is
