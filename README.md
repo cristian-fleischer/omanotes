@@ -61,6 +61,13 @@ local work.
 Zoom, the width toggle, the editor font, the window's size and whether it was
 left full screen all come back on the next run.
 
+## Line height
+
+Prose is set at 140 percent of its own size. Fenced code and the fence rows
+around it are tighter at 125, so a block reads as one slab, and table rows
+tighter still at 120, so they read as a grid. All three are settings under
+`typography/` in the config, since the right answer depends on the font.
+
 ## Fonts
 
 The bundled font is iA Writer Mono S, under the SIL Open Font License 1.1. It is
