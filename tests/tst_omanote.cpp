@@ -188,6 +188,18 @@ private slots:
         QCOMPARE(window->property("editorFontFamily").toString(),
                  QStringLiteral("iA Writer Mono S"));
 
+        // The font dialog's own path: whatever it hands back has to reach the
+        // editor. accept() is a no-op on a closed dialog, so open it first;
+        // that covers everything except GTK's own list widget.
+        QObject *fontDialog = window->findChild<QObject *>(QStringLiteral("fontDialog"));
+        QVERIFY(fontDialog);
+        QVERIFY(fontDialog->setProperty("selectedFont", QVariant::fromValue(QFont(installed))));
+        QVERIFY(QMetaObject::invokeMethod(fontDialog, "open"));
+        QVERIFY(fontDialog->setProperty("selectedFont", QVariant::fromValue(QFont(installed))));
+        QVERIFY(QMetaObject::invokeMethod(fontDialog, "accept"));
+        QCOMPARE(window->property("editorFontFamily").toString(), installed);
+        QCOMPARE(editor->property("font").value<QFont>().family(), installed);
+
         QVERIFY(QMetaObject::invokeMethod(window.data(), "toggleFullWidth"));
         backend.saveViewState(1.0, false, QString());
     }
@@ -198,6 +210,38 @@ private slots:
     // QSyntaxHighlighter cannot set. Backend reads the block's kind instead.
     // The slab is a step away from the page, not a fixed grey, so it keeps the
     // palette's hue when the wallpaper changes it.
+    // Box-drawing characters join only when the font draws them at least as
+    // tall as its own line. Having the glyphs is not enough: Noto Sans Mono has
+    // them at 0.92 of its line spacing, so every diagram comes out dashed.
+    void codeFontDrawsContinuousBoxes() {
+        QVERIFY(!MarkdownHighlighter::drawsContinuousBoxes(QString()));
+        QVERIFY(!MarkdownHighlighter::drawsContinuousBoxes(
+            QStringLiteral("No Such Family At All")));
+
+        QTextDocument document;
+        QFont base(QStringLiteral("Noto Sans Mono"));
+        base.setPixelSize(20);
+        document.setDefaultFont(base);
+        MarkdownHighlighter highlighter(&document);
+        setDocumentText(document, QStringLiteral("```\n\u250c\u2500\u2510\n```"));
+
+        // Whatever it settles on, it has to be a family that can draw the boxes.
+        const QStringList families = highlighter.codeFamilies();
+        QVERIFY(!families.isEmpty());
+        QVERIFY2(MarkdownHighlighter::drawsContinuousBoxes(families.constFirst()),
+                 qPrintable(families.constFirst()));
+        // The document font cannot, so it must have chosen something else.
+        QVERIFY(families.constFirst() != QStringLiteral("Noto Sans Mono"));
+
+        // A pinned family wins outright.
+        const QString pinned = QFontDatabase::families().constFirst();
+        highlighter.setCodeFontFamily(pinned);
+        QCOMPARE(highlighter.codeFamilies().constFirst(), pinned);
+        highlighter.setCodeFontFamily(QString());
+        QVERIFY(MarkdownHighlighter::drawsContinuousBoxes(
+            highlighter.codeFamilies().constFirst()));
+    }
+
     void codeBackgroundFollowsThePage() {
         const auto lightnessOf = [](const QColor &color) { return color.toHsl().lightnessF(); };
 
@@ -257,9 +301,10 @@ private slots:
         QCOMPARE(lineHeight(0), 140.0);  // prose
         QCOMPARE(lineHeight(2), 120.0);  // table row
         QCOMPARE(lineHeight(3), 120.0);  // separator row
-        QCOMPARE(lineHeight(5), 125.0);  // opening fence
-        QCOMPARE(lineHeight(6), 125.0);  // code
-        QCOMPARE(lineHeight(7), 125.0);  // closing fence
+        // The font's natural spacing, so box-drawing characters tile.
+        QCOMPARE(lineHeight(5), 100.0);  // opening fence
+        QCOMPARE(lineHeight(6), 100.0);  // code
+        QCOMPARE(lineHeight(7), 100.0);  // closing fence
 
         // Every run of fenced lines is reported once, fences included, so QML
         // can paint one slab behind each. Qt Quick's text node paints character
@@ -278,8 +323,8 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(editor.data(), "insert", Q_ARG(int, 0),
                                           Q_ARG(QString, QStringLiteral("```\n"))));
         backend.editorTextChanged();
-        QCOMPARE(lineHeight(1), 125.0);  // "prose line" is inside the fence now
-        QCOMPARE(lineHeight(3), 125.0);  // and so is the table
+        QCOMPARE(lineHeight(1), 100.0);  // "prose line" is inside the fence now
+        QCOMPARE(lineHeight(3), 100.0);  // and so is the table
 
         // Undoing puts both the text and the line heights back.
         QVERIFY(QMetaObject::invokeMethod(editor.data(), "undo"));

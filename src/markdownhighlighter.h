@@ -51,6 +51,18 @@ public:
     // prose around it.
     static bool isFenceLine(const QString &text);
 
+    // Whether a family can draw box-drawing characters that join into
+    // continuous rules: it must have the glyphs, and their ink must be at least
+    // as tall as the line they sit on. A font whose box glyphs are shorter than
+    // its own line spacing draws every diagram in dashes, however monospaced it
+    // is. Noto Sans Mono is such a font.
+    static bool drawsContinuousBoxes(const QString &family);
+
+    // Pin the family used for fenced code and inline code. Empty picks the best
+    // available automatically.
+    void setCodeFontFamily(const QString &family);
+    QStringList codeFamilies() const { return m_codeFamilies; }
+
     // A step away from the page's own colour rather than a fixed grey, so the
     // code slab keeps the palette's hue whatever the wallpaper does. The fenced
     // slab is drawn behind the editor from QML; inline code uses it as a
@@ -84,7 +96,9 @@ private:
     QString m_customForeground;
     QString m_customAccent;
     QFont m_formatFont;
-    QStringList m_monospaceFamilies;
+    QString m_codeFontFamily;
+    QStringList m_codeFamilies;
+    QStringList m_tableFamilies;
     QTextCharFormat m_markerFormat;
     QTextCharFormat m_hiddenMarkerFormat;
     QTextCharFormat m_headingFormats[6];

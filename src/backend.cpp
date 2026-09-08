@@ -34,11 +34,13 @@
 
 #include "markdownhighlighter.h"
 
-// Percentages of the line's own font size. Prose gets Typora's 140; code and
-// tables are set tighter so a fenced block reads as one slab and a table as a
-// grid. All three are settings, because the right answer depends on the font.
+// Percentages of the line's own font size. Prose gets Typora's 140. Code gets
+// 100, the font's natural line spacing, because box-drawing characters only
+// tile into continuous lines at that height: any leading breaks a diagram's
+// verticals into dashes. Tables sit between, since a pipe never joins anyway.
+// All three are settings, because the right answer depends on the font.
 constexpr qreal defaultLineHeightPercent = 140;
-constexpr qreal defaultCodeLineHeightPercent = 125;
+constexpr qreal defaultCodeLineHeightPercent = 100;
 constexpr qreal defaultTableLineHeightPercent = 120;
 const QString lastSaveDirectorySetting = QStringLiteral("file/lastSaveDirectory");
 
@@ -130,6 +132,7 @@ Backend::Backend(QObject *parent) : QObject(parent) {
                                       defaultCodeLineHeightPercent).toDouble();
     m_tableLineHeight = settings.value(QStringLiteral("typography/tableLineHeight"),
                                        defaultTableLineHeightPercent).toDouble();
+    m_codeFontFamily = settings.value(QStringLiteral("typography/codeFontFamily")).toString();
 
     loadOmarchyTheme();
     watchOmarchyTheme();
@@ -195,6 +198,7 @@ void Backend::attachDocument(QObject *textDocument) {
     m_highlighter = new MarkdownHighlighter(m_document);
     m_highlighter->setDarkMode(m_darkMode);
     m_highlighter->setColors(m_themeBackground, m_themeForeground, m_themeAccent);
+    m_highlighter->setCodeFontFamily(m_codeFontFamily);
 
     connect(m_document, &QTextDocument::contentsChange, this,
             [this](int position, int, int charsAdded) {

@@ -5,6 +5,7 @@
 #include <QFontDatabase>
 #include <QFontInfo>
 #include <QFontMetricsF>
+#include <QRawFont>
 #include <QTextBlock>
 #include <QTextDocument>
 
@@ -64,6 +65,82 @@ bool isParagraphLine(const QString &line) {
     return !listRe().match(line).hasMatch();
 }
 
+// QFontInfo::fixedPitch() reports false for iA Writer Mono S even though every
+// advance is the same, so ask the metrics rather than the font's own claim.
+bool isMonospaced(const QFont &font) {
+    const QFontMetricsF metrics(font);
+    return qFuzzyCompare(metrics.horizontalAdvance(QLatin1Char('i')),
+                         metrics.horizontalAdvance(QLatin1Char('M')));
+}
+
+// QFontDatabase::systemFont() hands back the alias "monospace", which a
+// QTextCharFormat cannot resolve: the run silently falls back to the document's
+// own font. Resolve it to the family fontconfig actually picked.
+QString resolvedFamily(const QFont &font) {
+    const QString family = QRawFont::fromFont(font).familyName();
+    return family.isEmpty() ? font.family() : family;
+}
+
+// Box-drawing characters join into continuous rules only when two things hold:
+// they come from the same font as the code around them, and that font draws
+// them at least as tall as the line they sit on. Having the glyphs is not
+// enough. Noto Sans Mono, the system fixed font on this machine, draws U+2502
+// at 0.92 of its own line spacing, which is a dashed line however the leading
+// is set.
+bool boxDrawingTiles(const QFont &font) {
+    const QRawFont raw = QRawFont::fromFont(font);
+    if (!raw.isValid())
+        return false;
+    for (const char32_t character : {U'\u2500', U'\u2502', U'\u250c', U'\u252c'}) {
+        if (!raw.supportsCharacter(character))
+            return false;
+    }
+
+    const QList<quint32> glyphs = raw.glyphIndexesForString(QStringLiteral("\u2502"));
+    if (glyphs.isEmpty())
+        return false;
+
+    const qreal lineSpacing = QFontMetricsF(font).lineSpacing();
+    return lineSpacing > 0 && raw.boundingRect(glyphs.constFirst()).height() >= lineSpacing;
+}
+
+// An unknown name is not a font: QFont substitutes silently, so asking the
+// substitute whether it draws boxes answers about the wrong font.
+bool isInstalled(const QString &family) {
+    return QFontDatabase::families().contains(family, Qt::CaseInsensitive);
+}
+
+QFont probeFont(const QString &family) {
+    QFont font(family);
+    // Big enough that hinting cannot round the comparison the wrong way.
+    font.setPixelSize(40);
+    return font;
+}
+
+// The first installed monospace family that draws continuous boxes. Scanning
+// every fixed-pitch family costs a few hundred milliseconds, so try the usual
+// suspects first and remember the answer for the life of the process.
+QString firstTilingMonospaceFamily() {
+    static const QString cached = []() -> QString {
+        const QStringList installed = QFontDatabase::families();
+        const QStringList likely{QStringLiteral("DejaVu Sans Mono"),
+                                 QStringLiteral("Liberation Mono"),
+                                 QStringLiteral("Adwaita Mono"),
+                                 QStringLiteral("Consolas")};
+        for (const QString &family : likely) {
+            if (installed.contains(family) && boxDrawingTiles(probeFont(family)))
+                return family;
+        }
+
+        for (const QString &family : installed) {
+            if (QFontDatabase::isFixedPitch(family) && boxDrawingTiles(probeFont(family)))
+                return family;
+        }
+        return {};
+    }();
+    return cached;
+}
+
 } // namespace
 
 bool MarkdownHighlighter::isTableRow(const QString &text) {
@@ -72,6 +149,18 @@ bool MarkdownHighlighter::isTableRow(const QString &text) {
 
 bool MarkdownHighlighter::isFenceLine(const QString &text) {
     return ::isFenceLine(text);
+}
+
+bool MarkdownHighlighter::drawsContinuousBoxes(const QString &family) {
+    return isInstalled(family) && boxDrawingTiles(probeFont(family));
+}
+
+void MarkdownHighlighter::setCodeFontFamily(const QString &family) {
+    if (m_codeFontFamily == family)
+        return;
+    m_codeFontFamily = family;
+    rebuildFormats();
+    rehighlight();
 }
 
 QColor MarkdownHighlighter::codeBackgroundFor(const QString &pageBackground, bool darkMode) {
@@ -160,14 +249,35 @@ void MarkdownHighlighter::rebuildFormats() {
     m_formatFont = document() ? document()->defaultFont() : QFont();
 
     // Tables and code only line up if every glyph on the line has the same
-    // advance. Prefer the document's own font when it is already fixed pitch,
-    // so a table keeps the look of the rest of the page.
-    m_monospaceFamilies.clear();
-    if (QFontInfo(m_formatFont).fixedPitch())
-        m_monospaceFamilies.append(m_formatFont.family());
-    const QString systemFixed = QFontDatabase::systemFont(QFontDatabase::FixedFont).family();
-    if (!m_monospaceFamilies.contains(systemFixed))
-        m_monospaceFamilies.append(systemFixed);
+    // advance. Prefer the document's own font when it is monospaced, so a table
+    // keeps the look of the rest of the page.
+    const QFont systemFixedFont = QFontDatabase::systemFont(QFontDatabase::FixedFont);
+    const QString systemFixed = resolvedFamily(systemFixedFont);
+
+    m_tableFamilies.clear();
+    if (isMonospaced(m_formatFont))
+        m_tableFamilies.append(m_formatFont.family());
+    m_tableFamilies.append(systemFixed);
+
+    // Code has the stronger requirement: one font for the whole block, and that
+    // font has to draw box characters that join, or every diagram in a fence
+    // comes out in dashes.
+    m_codeFamilies.clear();
+    if (isInstalled(m_codeFontFamily))
+        m_codeFamilies.append(m_codeFontFamily);
+    if (m_codeFamilies.isEmpty() && isMonospaced(m_formatFont)
+            && boxDrawingTiles(m_formatFont)) {
+        m_codeFamilies.append(m_formatFont.family());
+    }
+    if (m_codeFamilies.isEmpty() && boxDrawingTiles(systemFixedFont))
+        m_codeFamilies.append(systemFixed);
+    if (m_codeFamilies.isEmpty()) {
+        const QString tiling = firstTilingMonospaceFamily();
+        if (!tiling.isEmpty())
+            m_codeFamilies.append(tiling);
+    }
+    if (m_codeFamilies.isEmpty())
+        m_codeFamilies = m_tableFamilies;
 
     m_markerFormat = QTextCharFormat();
     m_markerFormat.setForeground(marker);
@@ -227,18 +337,19 @@ void MarkdownHighlighter::rebuildFormats() {
     m_codeFormat = QTextCharFormat();
     m_codeFormat.setForeground(text);
     m_codeFormat.setBackground(codeBackground);
+    m_codeFormat.setFontFamilies(m_codeFamilies);
 
     m_codeBlockFormat = QTextCharFormat();
     m_codeBlockFormat.setForeground(text);
-    m_codeBlockFormat.setFontFamilies(m_monospaceFamilies);
+    m_codeBlockFormat.setFontFamilies(m_codeFamilies);
 
     m_fenceFormat = QTextCharFormat();
     m_fenceFormat.setForeground(marker);
-    m_fenceFormat.setFontFamilies(m_monospaceFamilies);
+    m_fenceFormat.setFontFamilies(m_codeFamilies);
 
     m_tableFormat = QTextCharFormat();
     m_tableFormat.setForeground(text);
-    m_tableFormat.setFontFamilies(m_monospaceFamilies);
+    m_tableFormat.setFontFamilies(m_tableFamilies);
 
     m_tablePipeFormat = m_tableFormat;
     m_tablePipeFormat.setForeground(marker);

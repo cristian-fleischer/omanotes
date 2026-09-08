@@ -159,6 +159,7 @@ private:
     qreal m_lineHeight = 140;
     qreal m_codeLineHeight = 125;
     qreal m_tableLineHeight = 120;
+    QString m_codeFontFamily;
     int m_lastChangePos = 0;
     int m_lastChangeAdded = 0;
     QTimer m_wordCountTimer;
