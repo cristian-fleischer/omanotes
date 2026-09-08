@@ -36,6 +36,10 @@ class Backend : public QObject {
     Q_PROPERTY(QString themeSelection READ themeSelection NOTIFY themeColorsChanged)
     Q_PROPERTY(QString themeCodeBackground READ themeCodeBackground NOTIFY themeColorsChanged)
     Q_PROPERTY(QString themeMarker READ themeMarker NOTIFY themeColorsChanged)
+    // Padding inside a rendered block, in pixels at text scale 1. The editor
+    // insets the text of code blocks and tables by this much; QML bleeds the
+    // slab out by the same amount on all four sides.
+    Q_PROPERTY(int blockPadding READ blockPadding CONSTANT)
 
 public:
     // How the open file separates its lines, and whether it starts with a UTF-8
@@ -66,6 +70,7 @@ public:
     QString themeSelection() const { return m_themeSelection; }
     QString themeCodeBackground() const;
     QString themeMarker() const;
+    int blockPadding() const { return m_blockPadding; }
     static int countWords(const QString &text);
     static QString decodeFileContents(const QByteArray &bytes, LineEnding *lineEnding,
                                       bool *hasByteOrderMark);
@@ -125,7 +130,11 @@ public:
     Q_INVOKABLE void setCursorPosition(int position);
     Q_INVOKABLE QVariantMap viewState() const;
     Q_INVOKABLE void saveViewState(qreal zoom, bool fullWidth,
-                                   const QString &fontFamily, int contentColumns);
+                                   const QString &fontFamily, int contentColumns,
+                                   const QString &interfaceFontFamily);
+    // view/interfaceFontFamily, resolved to a family the font database knows.
+    // Empty means the bundled font. Read before any Backend exists, so static.
+    static QString interfaceFontFamily();
     Q_INVOKABLE QVariantMap sidebarState() const;
     Q_INVOKABLE void saveSidebarState(bool visible, int width);
     Q_INVOKABLE QVariantMap windowGeometry() const;
@@ -165,7 +174,8 @@ private:
     void reapplyTypographyToChange();
     bool isCodeBlock(const QTextBlock &block) const;
     qreal lineHeightForBlock(const QTextBlock &block) const;
-    bool hasWantedLineHeight(const QTextBlock &block) const;
+    qreal blockMarginFor(const QTextBlock &block) const;
+    bool hasWantedTypography(const QTextBlock &block) const;
     void applyBlockTypography(QTextCursor &cursor, const QTextBlock &block);
     void scheduleRecovery();
     void writeRecovery();
@@ -200,6 +210,8 @@ private:
     qreal m_lineHeight = 140;
     qreal m_codeLineHeight = 125;
     qreal m_tableLineHeight = 120;
+    // Pixels at text scale 1, from settings.
+    int m_blockPadding = 12;
     QString m_codeFontFamily;
     int m_lastChangePos = 0;
     int m_lastChangeAdded = 0;

@@ -56,6 +56,12 @@ ApplicationWindow {
     property string editorFontFamily: bundledFontFamily
     // How wide the text column is, in characters. view/contentColumns.
     property int contentColumns: 65
+    // view/interfaceFontFamily. Applied to the whole application font by main()
+    // before any of this loads; kept here only so saving the view state writes
+    // it back rather than dropping it.
+    property string interfaceFontFamily: ""
+    // Padding inside a code block or a table, from typography/blockPadding.
+    readonly property int blockPadding: win.scaledSize(backend.blockPadding)
     // One entry per run of fenced-code lines: {y, height} in the editor's
     // coordinates. Recomputed after layout, never during it.
     property var codeSlabs: []
@@ -134,7 +140,7 @@ ApplicationWindow {
         backend.saveViewState(win.editorZoom, win.fullWidth,
                               win.editorFontFamily === win.bundledFontFamily
                                   ? "" : win.editorFontFamily,
-                              win.contentColumns);
+                              win.contentColumns, win.interfaceFontFamily);
     }
 
     function setZoom(zoom) {
@@ -805,17 +811,22 @@ ApplicationWindow {
                             color: backend.themeMarker
                             x: modelData.x
                                 + Math.round((writerFontMetrics.advanceWidth("*") - dot) / 2)
-                            y: modelData.y + Math.round((modelData.height - dot) / 2)
+                            // Centred on the x-height, where a bullet glyph
+                            // sits. The cursor rectangle spans ascent to
+                            // descent, so centring in it rides a little high.
+                            y: modelData.y
+                                + Math.round(writerFontMetrics.ascent
+                                             - writerFontMetrics.xHeight / 2 - dot / 2)
                         }
                     }
 
                     Repeater {
                         model: win.tableSlabs
                         Item {
-                            x: -win.scaledSize(10)
-                            width: codeSlabLayer.width + win.scaledSize(20)
-                            y: modelData.y - win.scaledSize(5)
-                            height: modelData.height + win.scaledSize(10)
+                            x: -win.blockPadding
+                            width: codeSlabLayer.width + 2 * win.blockPadding
+                            y: modelData.y - win.blockPadding
+                            height: modelData.height + 2 * win.blockPadding
 
                             Rectangle {
                                 anchors.fill: parent
@@ -831,10 +842,10 @@ ApplicationWindow {
                             Repeater {
                                 model: modelData.columns
                                 Rectangle {
-                                    x: modelData + win.scaledSize(10)
+                                    x: modelData + win.blockPadding
                                     width: Math.max(1, Math.round(win.scaledSize(1)))
-                                    y: win.scaledSize(5)
-                                    height: parent.height - win.scaledSize(10)
+                                    y: win.blockPadding
+                                    height: parent.height - 2 * win.blockPadding
                                     color: win.mutedColor
                                     opacity: 0.4
                                 }
@@ -843,8 +854,8 @@ ApplicationWindow {
                             // Where the |---|---| row was.
                             Rectangle {
                                 visible: modelData.ruleY >= 0
-                                x: win.scaledSize(10)
-                                width: parent.width - win.scaledSize(20)
+                                x: win.blockPadding
+                                width: parent.width - 2 * win.blockPadding
                                 y: modelData.ruleY - parent.y
                                 height: Math.max(1, Math.round(win.scaledSize(1)))
                                 color: win.mutedColor
@@ -869,11 +880,13 @@ ApplicationWindow {
                         model: win.codeSlabs
                         Rectangle {
                             // Padding on all four sides, so the code sits in
-                            // the slab rather than against its edges.
-                            x: -win.scaledSize(14)
-                            width: codeSlabLayer.width + win.scaledSize(28)
-                            y: modelData.y - win.scaledSize(7)
-                            height: modelData.height + win.scaledSize(14)
+                            // the slab rather than against its edges. The text
+                            // itself is inset by the same amount, as a block
+                            // margin the editor applies.
+                            x: -win.blockPadding
+                            width: codeSlabLayer.width + 2 * win.blockPadding
+                            y: modelData.y - win.blockPadding
+                            height: modelData.height + 2 * win.blockPadding
                             radius: win.scaledSize(5)
                             color: backend.themeCodeBackground
                         }
@@ -1434,6 +1447,7 @@ ApplicationWindow {
         if (view.fontFamily.length > 0)
             win.editorFontFamily = view.fontFamily;
         win.contentColumns = view.contentColumns;
+        win.interfaceFontFamily = view.interfaceFontFamily;
         // Write them straight back, so every knob is in the config file to be
         // found rather than appearing only once it has been changed.
         saveView();

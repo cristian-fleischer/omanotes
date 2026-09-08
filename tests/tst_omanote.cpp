@@ -476,7 +476,7 @@ private slots:
         QCOMPARE(editor->property("font").value<QFont>().family(), installed);
 
         QVERIFY(QMetaObject::invokeMethod(window.data(), "toggleFullWidth"));
-        backend.saveViewState(1.0, false, QString(), 65);
+        backend.saveViewState(1.0, false, QString(), 65, QString());
     }
 
     // visibility reads Hidden by the time the window is torn down, so the state
@@ -718,6 +718,21 @@ private slots:
         QCOMPARE(lineHeight(6), 100.0);  // code
         QCOMPARE(lineHeight(7), 100.0);  // closing fence
 
+        // Code and tables are drawn on a slab, so their text is inset from the
+        // column the prose uses. The slab is bled out by the same amount in
+        // QML, which is what puts space on all four sides of the block.
+        const auto margins = [document](int blockNumber) {
+            const QTextBlockFormat format =
+                document->findBlockByNumber(blockNumber).blockFormat();
+            return QPair<qreal, qreal>{format.leftMargin(), format.rightMargin()};
+        };
+        const qreal padding = backend.blockPadding();
+        QVERIFY(padding > 0);
+        QCOMPARE(margins(0), (QPair<qreal, qreal>{0.0, 0.0}));            // prose
+        QCOMPARE(margins(2), (QPair<qreal, qreal>{padding, padding}));    // table row
+        QCOMPARE(margins(3), (QPair<qreal, qreal>{padding, padding}));    // separator
+        QCOMPARE(margins(6), (QPair<qreal, qreal>{padding, padding}));    // code
+
         // Every run of fenced lines is reported once, fences included, so QML
         // can paint one slab behind each. Qt Quick's text node paints character
         // backgrounds only, which came out ragged where lines are short and
@@ -737,13 +752,38 @@ private slots:
         backend.editorTextChanged();
         QCOMPARE(lineHeight(1), 100.0);  // "prose line" is inside the fence now
         QCOMPARE(lineHeight(3), 100.0);  // and so is the table
+        QCOMPARE(margins(1), (QPair<qreal, qreal>{padding, padding}));
 
         // Undoing puts both the text and the line heights back.
         QVERIFY(QMetaObject::invokeMethod(editor.data(), "undo"));
         backend.editorTextChanged();
         QCOMPARE(lineHeight(0), 140.0);
         QCOMPARE(lineHeight(2), 120.0);
+        QCOMPARE(margins(0), (QPair<qreal, qreal>{0.0, 0.0}));
         QCOMPARE(backend.fencedCodeRegions().size(), 1);
+    }
+
+    // The chrome's family is a config knob: main() reads it before any window
+    // exists, and the view state carries it back so it stays in the file.
+    void interfaceFontComesFromTheConfigFile() {
+        QSettings().remove(QStringLiteral("view/interfaceFontFamily"));
+        QCOMPARE(Backend::interfaceFontFamily(), QString());
+
+        const QStringList families = QFontDatabase::families();
+        QVERIFY(!families.isEmpty());
+        const QString installed = families.constFirst();
+
+        Backend backend;
+        backend.saveViewState(1.0, false, QString(), 65, installed);
+        QCOMPARE(backend.viewState().value(QStringLiteral("interfaceFontFamily")).toString(),
+                 installed);
+        QCOMPARE(Backend::interfaceFontFamily(), installed);
+
+        // A family nothing on the system provides falls back to the bundled one.
+        QSettings().setValue(QStringLiteral("view/interfaceFontFamily"),
+                             QStringLiteral("No Such Family"));
+        QCOMPARE(Backend::interfaceFontFamily(), QString());
+        QSettings().remove(QStringLiteral("view/interfaceFontFamily"));
     }
 
     void keepsWindowStateAcrossRuns() {
@@ -934,15 +974,16 @@ private slots:
         QCOMPARE(lineWidth(1), lineWidth(0));
         QCOMPARE(lineWidth(2), lineWidth(0));
 
-        // It paints nothing, though, so the drawn dot is all you see.
+        // It paints nothing, though, so the drawn dot is all you see. The
+        // dot is in the layer behind the text, so the asterisk has to be
+        // transparent: painted in the page colour it carves itself out of it.
         const QTextCharFormat marker = formatAt(document, 1, 0);
-        QCOMPARE(marker.foreground().color(), QColor(QStringLiteral("#101010")));
+        QCOMPARE(marker.foreground().color().alpha(), 0);
         QVERIFY(!marker.hasProperty(QTextFormat::FontLetterSpacing));
         QCOMPARE(marker.fontPointSize(), 0.0);
 
         // A dash is left exactly as written.
-        QVERIFY(formatAt(document, 0, 0).foreground().color()
-                != QColor(QStringLiteral("#101010")));
+        QVERIFY(formatAt(document, 0, 0).foreground().color().alpha() > 0);
 
         QCOMPARE(MarkdownHighlighter::asteriskBulletColumn(QStringLiteral("* item")), 0);
         QCOMPARE(MarkdownHighlighter::asteriskBulletColumn(QStringLiteral("  * item")), 2);

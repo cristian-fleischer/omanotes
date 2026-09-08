@@ -42,6 +42,8 @@
 constexpr qreal defaultLineHeightPercent = 140;
 constexpr qreal defaultCodeLineHeightPercent = 100;
 constexpr qreal defaultTableLineHeightPercent = 120;
+// Pixels at text scale 1, inside a code block or a table.
+constexpr int defaultBlockPadding = 12;
 const QString lastSaveDirectorySetting = QStringLiteral("file/lastSaveDirectory");
 
 QString Backend::normalizedLinkUrl(const QString &clipboardText) {
@@ -132,6 +134,8 @@ Backend::Backend(QObject *parent) : QObject(parent) {
                                       defaultCodeLineHeightPercent).toDouble();
     m_tableLineHeight = settings.value(QStringLiteral("typography/tableLineHeight"),
                                        defaultTableLineHeightPercent).toDouble();
+    m_blockPadding = qBound(0, settings.value(QStringLiteral("typography/blockPadding"),
+                                              defaultBlockPadding).toInt(), 80);
     m_codeFontFamily = settings.value(QStringLiteral("typography/codeFontFamily")).toString();
 
     loadOmarchyTheme();
@@ -180,6 +184,9 @@ void Backend::setTextScale(qreal textScale) {
         return;
 
     m_textScale = textScale;
+    // Block margins are in pixels, so they do not follow the scale on their own.
+    if (m_document)
+        applyDocumentTypography();
     emit textScaleChanged();
 }
 
@@ -925,11 +932,21 @@ QVariantMap Backend::viewState() const {
             // How wide the text column is, in characters, when it is not set to
             // fill the window.
             {QStringLiteral("contentColumns"),
-             qBound(20, settings.value(QStringLiteral("view/contentColumns"), 65).toInt(), 300)}};
+             qBound(20, settings.value(QStringLiteral("view/contentColumns"), 65).toInt(), 300)},
+            // The chrome's family. Read at startup by main(), never from the
+            // interface, so it only round-trips through here to stay in the file.
+            {QStringLiteral("interfaceFontFamily"),
+             settings.value(QStringLiteral("view/interfaceFontFamily")).toString()}};
+}
+
+QString Backend::interfaceFontFamily() {
+    QSettings settings;
+    return resolveFontFamily(
+        settings.value(QStringLiteral("view/interfaceFontFamily")).toString());
 }
 
 void Backend::saveViewState(qreal zoom, bool fullWidth, const QString &fontFamily,
-                            int contentColumns) {
+                            int contentColumns, const QString &interfaceFontFamily) {
     QSettings settings;
     settings.setValue(QStringLiteral("view/zoom"), zoom);
     settings.setValue(QStringLiteral("view/fullWidth"), fullWidth);
@@ -937,6 +954,7 @@ void Backend::saveViewState(qreal zoom, bool fullWidth, const QString &fontFamil
     // only after it has been changed once.
     settings.setValue(QStringLiteral("view/fontFamily"), fontFamily);
     settings.setValue(QStringLiteral("view/contentColumns"), contentColumns);
+    settings.setValue(QStringLiteral("view/interfaceFontFamily"), interfaceFontFamily);
 }
 
 QVariantMap Backend::sidebarState() const {
@@ -1385,15 +1403,31 @@ qreal Backend::lineHeightForBlock(const QTextBlock &block) const {
     return m_lineHeight;
 }
 
-bool Backend::hasWantedLineHeight(const QTextBlock &block) const {
+// Code and tables are drawn on a slab, so their text is inset from the column
+// the prose uses. Everything else sits flush against it. The margin follows the
+// desktop's text scale rather than the zoom, which is what the slab drawn
+// around it in QML does.
+qreal Backend::blockMarginFor(const QTextBlock &block) const {
+    if (isCodeBlock(block) || MarkdownHighlighter::isTableRow(block.text()))
+        return m_blockPadding * m_textScale;
+    return 0.0;
+}
+
+bool Backend::hasWantedTypography(const QTextBlock &block) const {
     const QTextBlockFormat format = block.blockFormat();
+    const qreal margin = blockMarginFor(block);
     return format.lineHeightType() == QTextBlockFormat::ProportionalHeight
-        && qFuzzyCompare(format.lineHeight(), lineHeightForBlock(block));
+        && qFuzzyCompare(format.lineHeight(), lineHeightForBlock(block))
+        && qFuzzyCompare(format.leftMargin() + 1.0, margin + 1.0)
+        && qFuzzyCompare(format.rightMargin() + 1.0, margin + 1.0);
 }
 
 void Backend::applyBlockTypography(QTextCursor &cursor, const QTextBlock &block) {
     QTextBlockFormat blockFormat;
     blockFormat.setLineHeight(lineHeightForBlock(block), QTextBlockFormat::ProportionalHeight);
+    const qreal margin = blockMarginFor(block);
+    blockFormat.setLeftMargin(margin);
+    blockFormat.setRightMargin(margin);
     cursor.setPosition(block.position());
     cursor.mergeBlockFormat(blockFormat);
 }
@@ -1485,7 +1519,7 @@ void Backend::reapplyTypographyToChange() {
 
     QList<QTextBlock> stale;
     for (const QTextBlock &block : std::as_const(touched)) {
-        if (!hasWantedLineHeight(block))
+        if (!hasWantedTypography(block))
             stale.append(block);
     }
     if (stale.isEmpty())

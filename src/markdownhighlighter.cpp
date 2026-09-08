@@ -387,9 +387,11 @@ void MarkdownHighlighter::rebuildFormats() {
 
     // Unlike the hidden format, this one keeps the character's advance: the
     // asterisk of a list marker still occupies its cell, so the bullet drawn
-    // over it lines up with the dash of the item above.
+    // over it lines up with the dash of the item above. Transparent, not the
+    // page colour: the dot is painted in the layer behind the text, so an
+    // opaque glyph would carve its own shape out of it.
     m_invisibleMarkerFormat = QTextCharFormat();
-    m_invisibleMarkerFormat.setForeground(background);
+    m_invisibleMarkerFormat.setForeground(QColor(Qt::transparent));
 
     // Six levels. The steps between the middle ones used to be 10 to 15 per
     // cent, which is not enough to tell an H2 from an H4 at a glance, so the

@@ -43,7 +43,12 @@ int main(int argc, char *argv[]) {
 
     // Carry the desktop's text scale into the default font, so the chrome that
     // inherits it (dialog titles, buttons) grows along with the writing area.
-    const QFont interfaceFont(QStringLiteral("iA Writer Mono S"));
+    // view/interfaceFontFamily replaces the bundled font in the chrome. It is
+    // a config knob only: nothing in the interface writes it.
+    const QString interfaceFamily = Backend::interfaceFontFamily();
+    const QFont interfaceFont(interfaceFamily.isEmpty()
+                                  ? QStringLiteral("iA Writer Mono S")
+                                  : interfaceFamily);
     const qreal basePointSize = interfaceFont.pointSizeF() > 0
         ? interfaceFont.pointSizeF()
         : app.font().pointSizeF();

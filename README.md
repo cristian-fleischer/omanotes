@@ -105,15 +105,21 @@ left full screen all come back on the next run.
 
 ## Line height and the code slab
 
-Prose is set at 140 percent of its own size. Fenced code and the fence rows
-around it are tighter at 125, and table rows tighter still at 120, so they read
-as a grid. All three are settings under `typography/` in the config, since the
-right answer depends on the font.
+Prose is set at 140 percent of its own size. Table rows are tighter at 120 so
+they read as a grid, and fenced code sits at 100, the font's own spacing, which
+is what lets box-drawing characters tile into continuous rules. All three are
+settings under `typography/` in the config, since the right answer depends on
+the font.
 
 The background behind a fenced block is drawn as one rectangle behind the
 editor, not as a background on the characters, so it covers short lines, empty
 lines and the leading between rows alike. Its colour is a step down in lightness
 from the page, so it follows the palette rather than sitting on top of it.
+
+Code and tables sit inside their slab rather than against its edges:
+`typography/blockPadding` insets their text as a block margin and bleeds the
+slab out by the same amount, so the space is equal on all four sides. Prose
+stays flush with the column.
 
 ## Fonts
 
@@ -122,7 +128,8 @@ compiled into the binary, so it is there whether or not it is installed on the
 system.
 
 `Ctrl+Shift+F` picks a different family for the writing surface; the footer and
-the dialogs stay on the bundled one.
+the dialogs stay on the bundled one unless `view/interfaceFontFamily` names
+another, which is a config knob only.
 
 Fenced code is rendered in a font of its own, because iA Writer Mono S has no
 box-drawing glyphs and a diagram in a fence needs them to join into continuous
