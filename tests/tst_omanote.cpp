@@ -14,10 +14,136 @@ class OmanoteTest : public QObject {
 private slots:
     void initTestCase() {
         QVERIFY(m_settingsDirectory.isValid());
+        // Keeps recovery snapshots out of the real ~/.local/share/omanote.
+        QStandardPaths::setTestModeEnabled(true);
         QQuickStyle::setStyle(QStringLiteral("Material"));
         QSettings::setDefaultFormat(QSettings::IniFormat);
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
                            m_settingsDirectory.path());
+    }
+
+    void preservesLineEndingsAndByteOrderMark() {
+        Backend::LineEnding ending = Backend::LineEnding::Lf;
+        bool byteOrderMark = false;
+
+        const QByteArray crlf("# Title\r\n\r\nBody\r\n");
+        const QString decoded = Backend::decodeFileContents(crlf, &ending, &byteOrderMark);
+        QCOMPARE(decoded, QStringLiteral("# Title\n\nBody\n"));
+        QVERIFY(ending == Backend::LineEnding::CrLf);
+        QVERIFY(!byteOrderMark);
+        QCOMPARE(Backend::encodeFileContents(decoded, ending, byteOrderMark), crlf);
+
+        const QByteArray withMark = QByteArray("\xef\xbb\xbf", 3) + QByteArray("plain\n");
+        QCOMPARE(Backend::decodeFileContents(withMark, &ending, &byteOrderMark),
+                 QStringLiteral("plain\n"));
+        QVERIFY(ending == Backend::LineEnding::Lf);
+        QVERIFY(byteOrderMark);
+        QCOMPARE(Backend::encodeFileContents(QStringLiteral("plain\n"), ending, byteOrderMark),
+                 withMark);
+
+        // Mixed endings cannot survive a QTextDocument, which holds no carriage
+        // returns at all. They collapse to LF, and stay LF on save.
+        const QByteArray mixed("one\r\ntwo\nthree\n");
+        QCOMPARE(Backend::decodeFileContents(mixed, &ending, &byteOrderMark),
+                 QStringLiteral("one\ntwo\nthree\n"));
+        QVERIFY(ending == Backend::LineEnding::Lf);
+    }
+
+    void byteFidelity_data() {
+        QTest::addColumn<QString>("sourcePath");
+
+        const QString corpus = corpusDirectory();
+        QVERIFY(!corpus.isEmpty());
+        const QFileInfoList files = QDir(corpus).entryInfoList(
+            QStringList{QStringLiteral("*.md")}, QDir::Files, QDir::Name);
+        QVERIFY(!files.isEmpty());
+        for (const QFileInfo &file : files)
+            QTest::newRow(qPrintable(file.fileName())) << file.absoluteFilePath();
+    }
+
+    // The requirement that killed every alternative: opening a note, changing
+    // your mind, and saving must leave the file byte for byte as it was.
+    void byteFidelity() {
+        QFETCH(QString, sourcePath);
+
+        QFile source(sourcePath);
+        QVERIFY(source.open(QIODevice::ReadOnly));
+        const QByteArray original = source.readAll();
+        source.close();
+
+        QTemporaryDir workingDirectory;
+        QVERIFY(workingDirectory.isValid());
+        const QString path = workingDirectory.filePath(QFileInfo(sourcePath).fileName());
+        QVERIFY(QFile::copy(sourcePath, path));
+
+        QQmlEngine engine;
+        QScopedPointer<QObject> editor(createEditor(&engine));
+        QVERIFY(editor);
+
+        Backend backend;
+        backend.attachDocument(editor->property("textDocument").value<QObject *>());
+        backend.open(QUrl::fromLocalFile(path));
+        QCOMPARE(backend.fileUrl(), QUrl::fromLocalFile(path));
+
+        QVERIFY(QMetaObject::invokeMethod(editor.data(), "insert", Q_ARG(int, 0),
+                                          Q_ARG(QString, QStringLiteral("draft "))));
+        backend.editorTextChanged();
+        QVERIFY(backend.modified());
+
+        QVERIFY(QMetaObject::invokeMethod(editor.data(), "undo"));
+        backend.editorTextChanged();
+
+        backend.save();
+
+        QFile saved(path);
+        QVERIFY(saved.open(QIODevice::ReadOnly));
+        const QByteArray written = saved.readAll();
+        QCOMPARE(written.size(), original.size());
+        QCOMPARE(written, original);
+    }
+
+    void noMarkdownConversionApi() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+        const QDir sourceDirectory = QFileInfo(mainQmlPath).absoluteDir();
+
+        static const QRegularExpression conversionRe(QStringLiteral(
+            "toMarkdown|setMarkdown|MarkdownText|TextEdit\\.RichText"));
+
+        // Printing renders a throwaway QTextDocument through Qt's Markdown
+        // writer. That is the only permitted call, and it never sees the
+        // editing buffer.
+        const QString printingException =
+            QStringLiteral("rendered.setMarkdown(currentDocumentText());");
+
+        const QFileInfoList sources = sourceDirectory.entryInfoList(QDir::Files, QDir::Name);
+        QVERIFY(!sources.isEmpty());
+
+        QStringList offenders;
+        for (const QFileInfo &sourceFile : sources) {
+            QFile file(sourceFile.absoluteFilePath());
+            QVERIFY(file.open(QIODevice::ReadOnly | QIODevice::Text));
+            int lineNumber = 0;
+            while (!file.atEnd()) {
+                const QString line = QString::fromUtf8(file.readLine());
+                ++lineNumber;
+                if (!conversionRe.match(line).hasMatch())
+                    continue;
+                if (sourceFile.fileName() == QStringLiteral("backend.cpp")
+                        && line.trimmed() == printingException)
+                    continue;
+                offenders.append(QStringLiteral("%1:%2 %3")
+                                     .arg(sourceFile.fileName())
+                                     .arg(lineNumber)
+                                     .arg(line.trimmed()));
+            }
+        }
+        QVERIFY2(offenders.isEmpty(), qPrintable(offenders.join(QLatin1Char('\n'))));
+
+        QFile mainQml(mainQmlPath);
+        QVERIFY(mainQml.open(QIODevice::ReadOnly | QIODevice::Text));
+        QVERIFY(QString::fromUtf8(mainQml.readAll())
+                    .contains(QStringLiteral("textFormat: TextEdit.PlainText")));
     }
 
     void countsWords() {
@@ -247,6 +373,31 @@ private slots:
     }
 
 private:
+    // A bare plain-text TextEdit, so a Backend can be attached without a window.
+    static QObject *createEditor(QQmlEngine *engine) {
+        auto *component = new QQmlComponent(engine, engine);
+        component->setData(R"QML(
+            import QtQuick
+            TextEdit { textFormat: TextEdit.PlainText }
+        )QML", QUrl());
+        if (!component->isReady()) {
+            qWarning().noquote() << component->errorString();
+            return nullptr;
+        }
+        return component->create();
+    }
+
+    static QString corpusDirectory() {
+        const QString found = QFINDTESTDATA("corpus");
+        if (!found.isEmpty())
+            return found;
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        if (mainQmlPath.isEmpty())
+            return {};
+        return QFileInfo(mainQmlPath).absoluteDir().absoluteFilePath(
+            QStringLiteral("../tests/corpus"));
+    }
+
     QTemporaryDir m_settingsDirectory;
 };
 

@@ -30,6 +30,11 @@ class Backend : public QObject {
     Q_PROPERTY(QString themeSelection READ themeSelection NOTIFY themeColorsChanged)
 
 public:
+    // How the open file separates its lines, and whether it starts with a UTF-8
+    // byte order mark. Both are properties of the bytes on disk, not of the
+    // document, so they are carried across a load and replayed on every save.
+    enum class LineEnding { Lf, CrLf };
+
     explicit Backend(QObject *parent = nullptr);
     ~Backend() override;
 
@@ -50,6 +55,10 @@ public:
     QString themeAccent() const { return m_themeAccent; }
     QString themeSelection() const { return m_themeSelection; }
     static int countWords(const QString &text);
+    static QString decodeFileContents(const QByteArray &bytes, LineEnding *lineEnding,
+                                      bool *hasByteOrderMark);
+    static QByteArray encodeFileContents(const QString &text, LineEnding lineEnding,
+                                         bool hasByteOrderMark);
     static QString normalizedLinkUrl(const QString &clipboardText);
     static QString suggestedFileName(const QString &text);
 
@@ -132,6 +141,8 @@ private:
     QString m_lastDocumentText;
     QByteArray m_lastKnownFileContents;
     bool m_hasKnownFileContents = false;
+    LineEnding m_lineEnding = LineEnding::Lf;
+    bool m_hasByteOrderMark = false;
     QString m_recoveryPath;
     std::unique_ptr<QLockFile> m_recoveryLock;
 

@@ -206,13 +206,15 @@ void Backend::open(const QUrl &url) {
 
     const QString targetName = QFileInfo(url.toLocalFile()).fileName();
     QFile file(url.toLocalFile());
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+    // Not QIODevice::Text: that mode folds CRLF to LF on the way in, and the
+    // save path would then write the file back with the endings changed.
+    if (!file.open(QIODevice::ReadOnly)) {
         setStatus(QStringLiteral("Could not open %1.").arg(targetName));
         return;
     }
 
     const QByteArray contents = file.readAll();
-    loadDocumentText(QString::fromUtf8(contents));
+    loadDocumentText(decodeFileContents(contents, &m_lineEnding, &m_hasByteOrderMark));
     clearRecovery();
     m_lastKnownFileContents = contents;
     m_hasKnownFileContents = true;
@@ -472,13 +474,14 @@ void Backend::saveTo(const QUrl &url) {
 
     const QString targetName = QFileInfo(url.toLocalFile()).fileName();
     QSaveFile file(url.toLocalFile());
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+    if (!file.open(QIODevice::WriteOnly)) {
         m_closeAfterSave = false;
         setStatus(QStringLiteral("Could not save %1.").arg(targetName));
         return;
     }
 
-    const QByteArray contents = currentDocumentText().toUtf8();
+    const QByteArray contents =
+        encodeFileContents(currentDocumentText(), m_lineEnding, m_hasByteOrderMark);
     file.write(contents);
 
     // QSaveFile commits by replacing the target. Stop watching the old inode
@@ -531,8 +534,11 @@ void Backend::writeRecovery() {
     QSaveFile file(path);
     if (!file.open(QIODevice::WriteOnly))
         return;
-    const QJsonObject recovery{{QStringLiteral("fileUrl"), m_fileUrl.toString()},
-                               {QStringLiteral("text"), currentDocumentText()}};
+    const QJsonObject recovery{
+        {QStringLiteral("fileUrl"), m_fileUrl.toString()},
+        {QStringLiteral("text"), currentDocumentText()},
+        {QStringLiteral("crlf"), m_lineEnding == LineEnding::CrLf},
+        {QStringLiteral("bom"), m_hasByteOrderMark}};
     file.write(QJsonDocument(recovery).toJson(QJsonDocument::Compact));
     file.commit();
 }
@@ -545,6 +551,9 @@ void Backend::restoreRecovery() {
     if (!json.isObject() || !json.object().contains(QStringLiteral("text")))
         return;
     const QJsonObject recovery = json.object();
+    m_lineEnding = recovery.value(QStringLiteral("crlf")).toBool() ? LineEnding::CrLf
+                                                                  : LineEnding::Lf;
+    m_hasByteOrderMark = recovery.value(QStringLiteral("bom")).toBool();
     loadDocumentText(recovery.value(QStringLiteral("text")).toString());
     const QUrl recoveredUrl(recovery.value(QStringLiteral("fileUrl")).toString());
     QFile diskFile(recoveredUrl.toLocalFile());
@@ -675,7 +684,68 @@ QUrl Backend::suggestedSaveUrl() const {
 }
 
 QString Backend::currentDocumentText() const {
-    return m_document ? m_document->toPlainText() : QString();
+    if (!m_document)
+        return QString();
+
+    // QTextDocument::toPlainText() rewrites the buffer on the way out: it folds
+    // U+00A0 to a plain space and U+2028 to a newline. Take the raw text and
+    // translate only the block separator, so a save writes back what was read.
+    QString text = m_document->toRawText();
+    text.replace(QChar(QChar::ParagraphSeparator), QLatin1Char('\n'));
+    // Frame boundaries, which a plain-text document has none of. Cheap
+    // insurance against a stray one reaching the file.
+    text.remove(QChar(0xfdd0));
+    text.remove(QChar(0xfdd1));
+    return text;
+}
+
+QString Backend::decodeFileContents(const QByteArray &bytes, LineEnding *lineEnding,
+                                    bool *hasByteOrderMark) {
+    static const QByteArray utf8Bom("\xef\xbb\xbf", 3);
+    const bool bom = bytes.startsWith(utf8Bom);
+    const QByteArray payload = bom ? bytes.mid(utf8Bom.size()) : bytes;
+
+    int newlines = 0;
+    int carriageReturnNewlines = 0;
+    for (qsizetype i = 0; i < payload.size(); ++i) {
+        if (payload.at(i) != '\n')
+            continue;
+        ++newlines;
+        if (i > 0 && payload.at(i - 1) == '\r')
+            ++carriageReturnNewlines;
+    }
+
+    // CRLF only when every newline is one. A file with mixed endings keeps its
+    // bytes as they are rather than being normalised into something nobody wrote.
+    const LineEnding ending = newlines > 0 && carriageReturnNewlines == newlines
+        ? LineEnding::CrLf
+        : LineEnding::Lf;
+
+    // QTextDocument turns every carriage return into a block break, so the
+    // buffer can never hold one. Normalise on the way in, and put CRLF back on
+    // the way out for a file whose newlines are all CRLF. A file with mixed
+    // endings is the one case that changes shape: it is written back with LF.
+    QString text = QString::fromUtf8(payload);
+    text.replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
+    text.replace(QLatin1Char('\r'), QLatin1Char('\n'));
+
+    if (lineEnding)
+        *lineEnding = ending;
+    if (hasByteOrderMark)
+        *hasByteOrderMark = bom;
+    return text;
+}
+
+QByteArray Backend::encodeFileContents(const QString &text, LineEnding lineEnding,
+                                       bool hasByteOrderMark) {
+    QString out = text;
+    if (lineEnding == LineEnding::CrLf)
+        out.replace(QLatin1Char('\n'), QStringLiteral("\r\n"));
+
+    QByteArray bytes = out.toUtf8();
+    if (hasByteOrderMark)
+        bytes.prepend("\xef\xbb\xbf", 3);
+    return bytes;
 }
 
 int Backend::countWords(const QString &text) {
