@@ -913,6 +913,14 @@ ApplicationWindow {
                 opacity: 0.55
 
                 FooterIconButton {
+                    objectName: "sidebarButton"
+                    iconName: "sidebar"
+                    iconColor: win.sidebarVisible ? win.textColor : win.mutedColor
+                    tooltip: "Notes sidebar (Ctrl+L)"
+                    onClicked: win.toggleSidebar()
+                }
+
+                FooterIconButton {
                     objectName: "saveButton"
                     iconName: "save"
                     iconColor: win.mutedColor

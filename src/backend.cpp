@@ -407,7 +407,7 @@ void Backend::openExternalUrl(const QUrl &url) {
 QVariantMap Backend::sidebarState() const {
     QSettings settings;
     return {{QStringLiteral("visible"),
-             settings.value(QStringLiteral("vault/sidebarVisible"), true)},
+             settings.value(QStringLiteral("vault/sidebarVisible"), false)},
             {QStringLiteral("width"),
              settings.value(QStringLiteral("vault/sidebarWidth"), 260)}};
 }

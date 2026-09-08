@@ -54,6 +54,14 @@ Item {
                 context.lineTo(4.5, 9.5);
                 context.lineTo(11.5, 9.5);
                 context.lineTo(11.5, 13.5);
+            } else if (control.iconName === "sidebar") {
+                context.moveTo(2.5, 3.5);
+                context.lineTo(13.5, 3.5);
+                context.lineTo(13.5, 12.5);
+                context.lineTo(2.5, 12.5);
+                context.closePath();
+                context.moveTo(6.5, 3.5);
+                context.lineTo(6.5, 12.5);
             } else {
                 context.moveTo(2.5, 13);
                 context.lineTo(2.5, 3.5);

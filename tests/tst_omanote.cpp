@@ -179,10 +179,13 @@ private slots:
         filterField->setProperty("text", QString());
         QCOMPARE(list->property("count").toInt(), 3);
 
-        QVERIFY(QMetaObject::invokeMethod(window.data(), "toggleSidebar"));
+        // Closed until asked for, from the footer icon or Ctrl+L.
         QCOMPARE(window->property("sidebarVisible").toBool(), false);
+        QVERIFY(window->findChild<QObject *>(QStringLiteral("sidebarButton")));
         QVERIFY(QMetaObject::invokeMethod(window.data(), "toggleSidebar"));
         QCOMPARE(window->property("sidebarVisible").toBool(), true);
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "toggleSidebar"));
+        QCOMPARE(window->property("sidebarVisible").toBool(), false);
 
         QVERIFY(QMetaObject::invokeMethod(window.data(), "createNote"));
         QCOMPARE(QFileInfo(backend.fileUrl().toLocalFile()).fileName(),

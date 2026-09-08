@@ -30,7 +30,7 @@ the sidebar footer; the default is `$HOME/Notes`.
 - `Ctrl+S` saves. Unsaved documents use the XDG desktop portal file picker.
 - `Ctrl+Shift+S` saves as.
 - `Ctrl+O` opens a Markdown file through the portal picker.
-- `Ctrl+L` shows and hides the sidebar. `Ctrl+Shift+L` focuses its filter field.
+- `Ctrl+L` shows and hides the sidebar, as does the leftmost footer icon. It starts hidden. `Ctrl+Shift+L` focuses its filter field.
 - `Ctrl+Alt+N` creates a new note in the vault root.
 - `Ctrl+P` opens the system print dialog.
 - `Ctrl+N` opens a new OmaNote window.
