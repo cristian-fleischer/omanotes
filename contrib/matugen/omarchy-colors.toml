@@ -1,0 +1,8 @@
+# Written by matugen from the wallpaper's Material palette. Edits are lost on
+# the next theme change. See contrib/matugen/README.md.
+
+mode = "{{mode}}"
+background = "{{colors.background.default.hex}}"
+foreground = "{{colors.on_background.default.hex}}"
+accent = "{{colors.primary.default.hex}}"
+selection = "{{colors.secondary_container.default.hex}}"
