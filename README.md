@@ -19,6 +19,35 @@ bin/install     # builds, then makepkg -fsi
 
 Installs as `omanote`, alongside `omawrite` if you have it.
 
+## What it renders
+
+The buffer is always your Markdown. These are drawn over it, never in it.
+
+| Written | Shown |
+| --- | --- |
+| `# ` to `###### ` | Six heading sizes, 1.9x down to 1.0x, the deeper ones fading. Markers hidden. |
+| `**b**`, `*i*`, `***bi***`, `~~s~~` | Bold, italic, both, struck through. Markers hidden. |
+| `[text](url)`, `![alt](src)` | The text, underlined in the accent colour. Ctrl+click opens it. |
+| ` ```lang ` | A slab behind the code, syntax highlighted, the fence rows folded away. |
+| `---` | A rule across the page. |
+| `* item` | A bullet. `-` and `+` are left alone. |
+| `- [ ]`, `- [x]` | A checkbox. Click it to toggle. |
+| `\| a \| b \|` | A table: slab, bold header, rules under the header and down each column. |
+
+Anything folded away comes back when the caret is on its line, or anywhere
+inside the fenced block, so it can still be edited.
+
+## Syntax highlighting
+
+Fenced blocks with a language are coloured by [Lexilla](https://github.com/ScintillaOrg/lexilla),
+vendored and linked statically in `third_party/lexilla`, so the package still
+depends only on Qt and the portal. PHP and Blade, JavaScript and the C family,
+Bash, JSON, Python, SQL. Anything else, `text` included, is left plain.
+
+`src/codesyntaxhighlighter.h` is the whole interface between the Markdown
+highlighter and the lexer: a list of languages and a `tokenize()` returning
+spans. Replacing Lexilla means writing one more adapter.
+
 ## The vault
 
 The sidebar shows every `.md` and `.markdown` file under one directory as a
@@ -40,6 +69,7 @@ behind it yet gets a row of its own at the top.
 - `Ctrl+=` and `Ctrl+-` scale the text, `Ctrl+0` puts it back, `Ctrl+wheel` does the same with the mouse.
 - `Ctrl+M` drops the 65-character measure and lets the text use the window, as does the rightmost footer icon.
 - `Ctrl+Shift+F` picks the editor font.
+- `Ctrl+click` opens a link, a bare URL, or a path that exists next to the note.
 - `Ctrl+P` opens the system print dialog.
 - `Ctrl+N` opens a new OmaNote window.
 - `Ctrl+Z`, `Ctrl+Shift+Z`, and `Ctrl+Y` handle undo and redo.
@@ -49,11 +79,11 @@ behind it yet gets a row of its own at the top.
 - `Ctrl+B`, `Ctrl+I`, and `Ctrl+K` insert bold, italic, and link Markdown.
 - `Ctrl+?` shows the keyboard shortcut reference.
 
-Closing the window never loses an unsaved draft and never asks about it. What
-you typed is written to a snapshot and comes back the next time the app opens,
-with the file on disk untouched, the way Sublime Text's hot exit works. The same
-snapshot covers a crash. Switching to another note still asks, since that buffer
-is about to be replaced.
+Nothing ever asks you about unsaved text. Closing the window keeps it; switching
+to another note keeps it under the note it belongs to and gives it back when you
+return. Every note holding a draft carries a dot in the sidebar until it is
+saved, and the file on disk is untouched throughout. The same snapshot covers a
+crash.
 
 OmaNote watches the open file and warns before an external change can replace
 local work.
