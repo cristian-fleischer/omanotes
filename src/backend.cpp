@@ -1013,6 +1013,7 @@ void Backend::loadDocumentText(const QString &text) {
     applyDocumentTypography();
     m_wordCountTimer.stop();
     setWordCount(countWords(text));
+    emit documentLoaded();
 }
 
 void Backend::setFileUrl(const QUrl &url) {

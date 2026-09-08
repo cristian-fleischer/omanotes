@@ -84,8 +84,11 @@ int main(int argc, char *argv[]) {
 
     backend.setParentWindow(qobject_cast<QWindow *>(engine.rootObjects().constFirst()));
 
+    // A file named on the command line wins over whatever the last session
+    // left behind: open() stashes the restored draft under the note it belongs
+    // to, so nothing is lost by moving off it.
     const QStringList args = app.arguments();
-    if (args.size() > 1 && !backend.modified())
+    if (args.size() > 1)
         backend.open(QUrl::fromLocalFile(args.at(1)));
 
     return app.exec();

@@ -61,6 +61,8 @@ ApplicationWindow {
     // it back rather than dropping it.
     property string interfaceFontFamily: ""
     // Padding inside a code block or a table, from typography/blockPadding.
+    // Left and right the editor applies it as a block margin; above and below
+    // the slab bleeds out by the same amount.
     readonly property int blockPadding: win.scaledSize(backend.blockPadding)
     // One entry per run of fenced-code lines: {y, height} in the editor's
     // coordinates. Recomputed after layout, never during it.
@@ -456,6 +458,14 @@ ApplicationWindow {
             vault.setCurrentUrl(backend.fileUrl);
         }
 
+        // A note opens at its first line. Loading the text leaves the document
+        // cursor after the last character, which drops the reader at the foot
+        // of anything longer than the window.
+        function onDocumentLoaded() {
+            editor.cursorPosition = 0;
+            editorFlick.contentY = 0;
+        }
+
         function onDraftsChanged() {
             vault.setDraftPaths(backend.draftPaths);
         }
@@ -823,8 +833,12 @@ ApplicationWindow {
                     Repeater {
                         model: win.tableSlabs
                         Item {
-                            x: -win.blockPadding
-                            width: codeSlabLayer.width + 2 * win.blockPadding
+                            // The slab is the text column exactly. All the
+                            // horizontal padding comes from the block margin
+                            // the editor applies, so it matches the vertical
+                            // padding the slab adds above and below.
+                            x: 0
+                            width: codeSlabLayer.width
                             y: modelData.y - win.blockPadding
                             height: modelData.height + 2 * win.blockPadding
 
@@ -842,7 +856,7 @@ ApplicationWindow {
                             Repeater {
                                 model: modelData.columns
                                 Rectangle {
-                                    x: modelData + win.blockPadding
+                                    x: modelData
                                     width: Math.max(1, Math.round(win.scaledSize(1)))
                                     y: win.blockPadding
                                     height: parent.height - 2 * win.blockPadding
@@ -851,11 +865,17 @@ ApplicationWindow {
                                 }
                             }
 
-                            // Where the |---|---| row was.
+                            // Where the |---|---| row was. It runs between
+                            // the outer column rules, not across the slab: a
+                            // rule sticking out past the table's own border
+                            // reads as a mistake.
                             Rectangle {
+                                readonly property var columns: modelData.columns
                                 visible: modelData.ruleY >= 0
-                                x: win.blockPadding
-                                width: parent.width - 2 * win.blockPadding
+                                x: columns.length > 1 ? columns[0] : 0
+                                width: columns.length > 1
+                                    ? columns[columns.length - 1] - columns[0]
+                                    : parent.width
                                 y: modelData.ruleY - parent.y
                                 height: Math.max(1, Math.round(win.scaledSize(1)))
                                 color: win.mutedColor
@@ -880,11 +900,12 @@ ApplicationWindow {
                         model: win.codeSlabs
                         Rectangle {
                             // Padding on all four sides, so the code sits in
-                            // the slab rather than against its edges. The text
-                            // itself is inset by the same amount, as a block
-                            // margin the editor applies.
-                            x: -win.blockPadding
-                            width: codeSlabLayer.width + 2 * win.blockPadding
+                            // the slab rather than against its edges. Above and
+                            // below the slab adds it; left and right the editor
+                            // does, as a block margin, so the slab is the text
+                            // column exactly and all four are the same.
+                            x: 0
+                            width: codeSlabLayer.width
                             y: modelData.y - win.blockPadding
                             height: modelData.height + 2 * win.blockPadding
                             radius: win.scaledSize(5)

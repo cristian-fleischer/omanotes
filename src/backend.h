@@ -155,6 +155,10 @@ signals:
     void saveSucceeded();
     void draftsChanged();
     void externalChangeDetected(bool deleted, bool locallyModified);
+    // A note's text has just been put in the buffer, by an open or a restored
+    // draft. Setting the text leaves the document cursor at the end, so the
+    // view has to be told to go back to the top.
+    void documentLoaded();
 
 private:
     void loadDocumentText(const QString &text);
