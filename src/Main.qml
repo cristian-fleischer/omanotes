@@ -13,7 +13,7 @@ ApplicationWindow {
     minimumWidth: 720
     minimumHeight: 520
     visible: true
-    title: (backend.modified ? "* " : "") + backend.fileName + " - Omawrite"
+    title: (backend.modified ? "* " : "") + backend.fileName + " - OmaNote"
 
     readonly property bool darkMode: backend.darkMode
     readonly property color pageColor: backend.themeBackground
@@ -330,9 +330,21 @@ ApplicationWindow {
         title: "Keyboard shortcuts"
         standardButtons: Dialog.Close
         anchors.centerIn: parent
-        contentItem: Label {
-            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
-            lineHeight: 1.5
+        contentItem: Column {
+            spacing: 12
+
+            Label {
+                text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
+                lineHeight: 1.5
+            }
+
+            // MIT requires the copyright notice to travel with the fork.
+            Label {
+                objectName: "attribution"
+                text: "OmaNote. Fork of OmaWrite by David Heinemeier Hansson, MIT."
+                color: win.mutedColor
+                font.pixelSize: win.scaledSize(11)
+            }
         }
     }
 

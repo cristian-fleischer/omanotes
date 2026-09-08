@@ -15,16 +15,18 @@
 
 int main(int argc, char *argv[]) {
     QApplication app(argc, argv);
-    app.setApplicationName(QStringLiteral("omawrite"));
-    app.setDesktopFileName(QStringLiteral("omawrite"));
-    app.setWindowIcon(QIcon::fromTheme(QStringLiteral("omawrite")));
+    app.setApplicationName(QStringLiteral("omanote"));
+    app.setDesktopFileName(QStringLiteral("omanote"));
+    app.setWindowIcon(QIcon::fromTheme(QStringLiteral("omanote")));
 
     QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/iAWriterMonoS-Regular.ttf"));
     QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/iAWriterMonoS-Italic.ttf"));
     QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/iAWriterMonoS-Bold.ttf"));
     QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/iAWriterMonoS-BoldItalic.ttf"));
-    app.setOrganizationName(QStringLiteral("Omacom"));
-    app.setOrganizationDomain(QStringLiteral("omacom.io"));
+    // QSettings resolves to ~/.config/omanote/omanote.conf. Leaving the
+    // organisation domain unset keeps the path off omacom.io, so OmaNote
+    // and OmaWrite never share a settings file.
+    app.setOrganizationName(QStringLiteral("omanote"));
 
     QQuickStyle::setStyle(QStringLiteral("Material"));
 
@@ -64,7 +66,7 @@ int main(int argc, char *argv[]) {
 
     engine.load(QUrl(QStringLiteral("qrc:/Main.qml")));
     if (engine.rootObjects().isEmpty()) {
-        qCritical() << "Could not load the Omawrite interface; resource available:"
+        qCritical() << "Could not load the OmaNote interface; resource available:"
                     << QFile::exists(QStringLiteral(":/Main.qml"));
         return -1;
     }
