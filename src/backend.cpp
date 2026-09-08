@@ -6,6 +6,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QFontDatabase>
 #include <QDesktopServices>
 #include <QGuiApplication>
 #include <QMimeData>
@@ -417,18 +418,42 @@ void Backend::openExternalUrl(const QUrl &url) {
 
 // Every getter here converts before returning. QSettings hands INI values back
 // as strings, and the string "false" is a true bool the moment QML touches it.
+QString Backend::resolveFontFamily(const QString &family) {
+    const QString wanted = family.trimmed();
+    if (wanted.isEmpty())
+        return {};
+
+    const QStringList known = QFontDatabase::families();
+    QStringList words = wanted.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    // Longest prefix wins, so "iA Writer Mono S Bold" resolves to the family and
+    // not to "iA Writer", which is also a real one.
+    while (!words.isEmpty()) {
+        const QString candidate = words.join(QLatin1Char(' '));
+        for (const QString &name : known) {
+            if (name.compare(candidate, Qt::CaseInsensitive) == 0)
+                return name;
+        }
+        words.removeLast();
+    }
+    return {};
+}
+
 QVariantMap Backend::viewState() const {
     QSettings settings;
     return {{QStringLiteral("zoom"),
              settings.value(QStringLiteral("view/zoom"), 1.0).toDouble()},
             {QStringLiteral("fullWidth"),
-             settings.value(QStringLiteral("view/fullWidth"), false).toBool()}};
+             settings.value(QStringLiteral("view/fullWidth"), false).toBool()},
+            // Empty means the bundled iA Writer Mono S.
+            {QStringLiteral("fontFamily"),
+             settings.value(QStringLiteral("view/fontFamily")).toString()}};
 }
 
-void Backend::saveViewState(qreal zoom, bool fullWidth) {
+void Backend::saveViewState(qreal zoom, bool fullWidth, const QString &fontFamily) {
     QSettings settings;
     settings.setValue(QStringLiteral("view/zoom"), zoom);
     settings.setValue(QStringLiteral("view/fullWidth"), fullWidth);
+    settings.setValue(QStringLiteral("view/fontFamily"), fontFamily);
 }
 
 QVariantMap Backend::sidebarState() const {
@@ -454,18 +479,23 @@ QVariantMap Backend::windowGeometry() const {
             {QStringLiteral("height"),
              settings.value(QStringLiteral("window/height"), 820).toInt()},
             {QStringLiteral("maximized"),
-             settings.value(QStringLiteral("window/maximized"), false).toBool()}};
+             settings.value(QStringLiteral("window/maximized"), false).toBool()},
+            {QStringLiteral("fullScreen"),
+             settings.value(QStringLiteral("window/fullScreen"), false).toBool()}};
 }
 
-void Backend::saveWindowGeometry(int x, int y, int width, int height, bool maximized) {
+void Backend::saveWindowGeometry(int x, int y, int width, int height, bool maximized,
+                                 bool fullScreen) {
     QSettings settings;
-    if (!maximized) {
-        settings.setValue(QStringLiteral("window/x"), x);
-        settings.setValue(QStringLiteral("window/y"), y);
-        settings.setValue(QStringLiteral("window/width"), width);
-        settings.setValue(QStringLiteral("window/height"), height);
-    }
+    // The caller passes the last geometry the window had while it was windowed,
+    // not the size it has now: a maximised or full-screen window reports the
+    // screen's size, which is not the size to come back to.
+    settings.setValue(QStringLiteral("window/x"), x);
+    settings.setValue(QStringLiteral("window/y"), y);
+    settings.setValue(QStringLiteral("window/width"), width);
+    settings.setValue(QStringLiteral("window/height"), height);
     settings.setValue(QStringLiteral("window/maximized"), maximized);
+    settings.setValue(QStringLiteral("window/fullScreen"), fullScreen);
 }
 
 void Backend::loadDocumentText(const QString &text) {

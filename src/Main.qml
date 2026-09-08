@@ -54,6 +54,27 @@ ApplicationWindow {
     // following the desktop's text size, which is a different knob.
     property real editorZoom: 1.0
     property bool fullWidth: false
+    // The writing surface's family. The chrome stays on the bundled font, so
+    // the footer and dialogs keep their proportions whatever you pick here.
+    readonly property string bundledFontFamily: "iA Writer Mono S"
+    property string editorFontFamily: bundledFontFamily
+
+    // Component.onDestruction runs after the window is hidden, when visibility
+    // reads Hidden and the size is whatever it last grew to. Both have to be
+    // recorded while the window is still on screen.
+    property int lastVisibility: Window.Windowed
+    property rect lastWindowedGeometry: Qt.rect(x, y, width, height)
+
+    onVisibilityChanged: {
+        if (visibility === Window.Windowed || visibility === Window.Maximized
+                || visibility === Window.FullScreen)
+            win.lastVisibility = visibility;
+    }
+
+    onXChanged: recordWindowedGeometry()
+    onYChanged: recordWindowedGeometry()
+    onWidthChanged: recordWindowedGeometry()
+    onHeightChanged: recordWindowedGeometry()
 
     Material.theme: darkMode ? Material.Dark : Material.Light
     Material.accent: backend.themeAccent
@@ -90,7 +111,7 @@ ApplicationWindow {
 
     FontMetrics {
         id: writerFontMetrics
-        font.family: "iA Writer Mono S"
+        font.family: win.editorFontFamily
         font.pixelSize: win.editorFontPixelSize
     }
 
@@ -120,14 +141,41 @@ ApplicationWindow {
             editor.forceActiveFocus();
     }
 
+    function saveView() {
+        backend.saveViewState(win.editorZoom, win.fullWidth,
+                              win.editorFontFamily === win.bundledFontFamily
+                                  ? "" : win.editorFontFamily);
+    }
+
     function setZoom(zoom) {
         win.editorZoom = Math.max(0.6, Math.min(2.5, Math.round(zoom * 100) / 100));
-        backend.saveViewState(win.editorZoom, win.fullWidth);
+        saveView();
     }
 
     function toggleFullWidth() {
         win.fullWidth = !win.fullWidth;
-        backend.saveViewState(win.editorZoom, win.fullWidth);
+        saveView();
+    }
+
+    function setEditorFont(family) {
+        var resolved = backend.resolveFontFamily(family);
+        win.editorFontFamily = resolved.length > 0 ? resolved : win.bundledFontFamily;
+        saveView();
+    }
+
+    // A maximised or full-screen window reports the screen's size, which is not
+    // the size to come back to.
+    function recordWindowedGeometry() {
+        if (win.visibility === Window.Windowed)
+            win.lastWindowedGeometry = Qt.rect(win.x, win.y, win.width, win.height);
+    }
+
+    function saveWindowState() {
+        backend.saveWindowGeometry(win.lastWindowedGeometry.x, win.lastWindowedGeometry.y,
+                                   win.lastWindowedGeometry.width,
+                                   win.lastWindowedGeometry.height,
+                                   win.lastVisibility === Window.Maximized,
+                                   win.lastVisibility === Window.FullScreen);
     }
 
     function toggleFullScreen() {
@@ -221,6 +269,15 @@ ApplicationWindow {
         sequence: "Ctrl+M"
         context: Qt.ApplicationShortcut
         onActivated: win.toggleFullWidth()
+    }
+
+    Shortcut {
+        sequence: "Ctrl+Shift+F"
+        context: Qt.ApplicationShortcut
+        onActivated: {
+            fontDialog.selectedFont = editor.font;
+            fontDialog.open();
+        }
     }
 
     Shortcut {
@@ -333,10 +390,6 @@ ApplicationWindow {
         // Whatever route a file arrived by, the sidebar highlights it.
         function onFileUrlChanged() {
             vault.setCurrentUrl(backend.fileUrl);
-
-        var view = backend.viewState();
-        win.editorZoom = view.zoom;
-        win.fullWidth = view.fullWidth;
         }
 
         function onOpenDialogRequested() {
@@ -385,6 +438,15 @@ ApplicationWindow {
             win.awaitingPendingSave = false;
             win.pendingAction = "";
         }
+    }
+
+    Dialogs.FontDialog {
+        id: fontDialog
+        objectName: "fontDialog"
+        title: "Editor font"
+        // Only the family carries over. Size follows the zoom and the desktop
+        // text scale, and weight and style are what the Markdown means.
+        onAccepted: win.setEditorFont(selectedFont.family)
     }
 
     Dialogs.FolderDialog {
@@ -439,7 +501,7 @@ ApplicationWindow {
             spacing: 12
 
             Label {
-                text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+Alt+N  New Note in the Vault\nCtrl+L  Toggle Sidebar\nCtrl+Shift+L  Focus the Note Filter\nCtrl+= / Ctrl+-  Zoom the Text\nCtrl+0  Reset the Zoom\nCtrl+M  Full Window Width\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
+                text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+Alt+N  New Note in the Vault\nCtrl+L  Toggle Sidebar\nCtrl+Shift+L  Focus the Note Filter\nCtrl+= / Ctrl+-  Zoom the Text\nCtrl+0  Reset the Zoom\nCtrl+M  Full Window Width\nCtrl+Shift+F  Editor Font\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
                 lineHeight: 1.5
             }
 
@@ -702,7 +764,7 @@ ApplicationWindow {
                     color: win.textColor
                     selectedTextColor: win.strongTextColor
                     selectionColor: win.selectionFill
-                    font.family: "iA Writer Mono S"
+                    font.family: win.editorFontFamily
                     font.pixelSize: win.editorFontPixelSize
                     font.weight: Font.Normal
                     // Native rendering hints glyphs to the pixel grid, which is
@@ -1188,9 +1250,18 @@ ApplicationWindow {
         if (geometry.y >= 0) y = geometry.y;
         width = geometry.width;
         height = geometry.height;
-        if (geometry.maximized) showMaximized();
+        if (geometry.fullScreen)
+            win.visibility = Window.FullScreen;
+        else if (geometry.maximized)
+            showMaximized();
 
         vault.setCurrentUrl(backend.fileUrl);
+
+        var view = backend.viewState();
+        win.editorZoom = view.zoom;
+        win.fullWidth = view.fullWidth;
+        if (view.fontFamily.length > 0)
+            win.editorFontFamily = view.fontFamily;
 
         var sidebarState = backend.sidebarState();
         win.sidebarWidth = sidebarState.width;
@@ -1199,7 +1270,7 @@ ApplicationWindow {
     }
 
     Component.onDestruction: {
-        backend.saveWindowGeometry(x, y, width, height, visibility === Window.Maximized);
+        saveWindowState();
         backend.saveSidebarState(win.sidebarVisible, win.sidebarWidth);
     }
 

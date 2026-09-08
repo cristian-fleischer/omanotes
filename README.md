@@ -39,6 +39,7 @@ behind it yet gets a row of its own at the top.
 - `Ctrl+Alt+N` creates a new note in the vault root.
 - `Ctrl+=` and `Ctrl+-` scale the text, `Ctrl+0` puts it back, `Ctrl+wheel` does the same with the mouse.
 - `Ctrl+M` drops the 65-character measure and lets the text use the window, as does the rightmost footer icon.
+- `Ctrl+Shift+F` picks the editor font.
 - `Ctrl+P` opens the system print dialog.
 - `Ctrl+N` opens a new OmaNote window.
 - `Ctrl+Z`, `Ctrl+Shift+Z`, and `Ctrl+Y` handle undo and redo.
@@ -57,9 +58,24 @@ is about to be replaced.
 OmaNote watches the open file and warns before an external change can replace
 local work.
 
-Text follows the desktop text size — `omarchy display text size`, or GNOME's
+Zoom, the width toggle, the editor font, the window's size and whether it was
+left full screen all come back on the next run.
+
+## Fonts
+
+The bundled font is iA Writer Mono S, under the SIL Open Font License 1.1. It is
+compiled into the binary, so it is there whether or not it is installed on the
+system.
+
+`Ctrl+Shift+F` picks a different family for the writing surface; the footer and
+the dialogs stay on the bundled one. Pick a proportional face and tables and
+fenced code still line up: the highlighter falls back to the system fixed-pitch
+font for those, since columns only align while every glyph has the same advance.
+
+Text also follows the desktop text size — `omarchy display text size`, or GNOME's
 `text-scaling-factor` — and re-flows without a restart. The default of 12px leaves
-the app at the size it is designed around; larger and smaller sizes scale from there.
+the app at the size it is designed around; larger and smaller sizes scale from
+there, and the zoom multiplies on top.
 
 ## Requirements
 

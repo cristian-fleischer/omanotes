@@ -85,12 +85,18 @@ public:
     Q_INVOKABLE QVariantList hiddenRangesAt(int position) const;
     Q_INVOKABLE void setSearchHighlight(const QString &query, int currentMatchStart);
     Q_INVOKABLE void openExternalUrl(const QUrl &url);
+    // The portal font chooser can hand back a styled name such as
+    // "iA Writer Mono S Bold". Resolve it to a family the font database
+    // knows, or to nothing, which means the bundled font.
+    Q_INVOKABLE static QString resolveFontFamily(const QString &family);
     Q_INVOKABLE QVariantMap viewState() const;
-    Q_INVOKABLE void saveViewState(qreal zoom, bool fullWidth);
+    Q_INVOKABLE void saveViewState(qreal zoom, bool fullWidth,
+                                   const QString &fontFamily);
     Q_INVOKABLE QVariantMap sidebarState() const;
     Q_INVOKABLE void saveSidebarState(bool visible, int width);
     Q_INVOKABLE QVariantMap windowGeometry() const;
-    Q_INVOKABLE void saveWindowGeometry(int x, int y, int width, int height, bool maximized);
+    Q_INVOKABLE void saveWindowGeometry(int x, int y, int width, int height,
+                                        bool maximized, bool fullScreen);
 
 signals:
     void fileUrlChanged();

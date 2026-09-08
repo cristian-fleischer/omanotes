@@ -3,6 +3,8 @@
 #include <QTextBlock>
 #include <QTextDocument>
 #include <QTextLayout>
+#include <QFontDatabase>
+#include <QWindow>
 #include <QQmlComponent>
 #include <QQmlContext>
 #include <QQmlEngine>
@@ -151,13 +153,87 @@ private slots:
         QCOMPARE(window->property("editorWidth").toInt(),
                  window->property("editorAreaWidth").toInt());
 
-        // Both settings outlive the window.
+        // Every view setting outlives the window.
         QVariantMap view = backend.viewState();
         QCOMPARE(view.value(QStringLiteral("zoom")).toDouble(), 1.0);
         QCOMPARE(view.value(QStringLiteral("fullWidth")).toBool(), true);
 
+        // The bundled family is stored as empty, so replacing the bundled font
+        // in a later release changes the default for anyone who never picked.
+        QCOMPARE(window->property("editorFontFamily").toString(),
+                 QStringLiteral("iA Writer Mono S"));
+        QCOMPARE(view.value(QStringLiteral("fontFamily")).toString(), QString());
+        QVERIFY(window->findChild<QObject *>(QStringLiteral("fontDialog")));
+
+        const QStringList families = QFontDatabase::families();
+        QVERIFY(!families.isEmpty());
+        const QString installed = families.constFirst();
+
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "setEditorFont",
+                                          Q_ARG(QVariant, QVariant(installed))));
+        QCOMPARE(editor->property("font").value<QFont>().family(), installed);
+        QCOMPARE(backend.viewState().value(QStringLiteral("fontFamily")).toString(),
+                 installed);
+
+        // The portal chooser lists styles as if they were families.
+        QCOMPARE(Backend::resolveFontFamily(installed + QStringLiteral(" Bold")), installed);
+        QCOMPARE(Backend::resolveFontFamily(QStringLiteral("No Such Family")), QString());
+        QCOMPARE(Backend::resolveFontFamily(QString()), QString());
+
+        // Anything that resolves to nothing falls back to the bundled font.
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "setEditorFont",
+                                          Q_ARG(QVariant, QVariant(QStringLiteral("No Such Family")))));
+        QCOMPARE(window->property("editorFontFamily").toString(),
+                 QStringLiteral("iA Writer Mono S"));
+
         QVERIFY(QMetaObject::invokeMethod(window.data(), "toggleFullWidth"));
-        backend.saveViewState(1.0, false);
+        backend.saveViewState(1.0, false, QString());
+    }
+
+    // visibility reads Hidden by the time the window is torn down, so the state
+    // to restore is the one recorded while it was still on screen.
+    void keepsWindowStateAcrossRuns() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        VaultModel vault;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        engine.rootContext()->setContextProperty(QStringLiteral("vault"), &vault);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        window->setProperty("lastWindowedGeometry", QRectF(120, 80, 900, 600));
+
+        // Qt reports a tiled window as maximised, so this is the ordinary case
+        // on a tiling compositor, not an unusual one.
+        window->setProperty("lastVisibility", int(QWindow::Maximized));
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "saveWindowState"));
+        QVariantMap geometry = backend.windowGeometry();
+        QCOMPARE(geometry.value(QStringLiteral("maximized")).toBool(), true);
+        QCOMPARE(geometry.value(QStringLiteral("fullScreen")).toBool(), false);
+        QCOMPARE(geometry.value(QStringLiteral("width")).toInt(), 900);
+        QCOMPARE(geometry.value(QStringLiteral("x")).toInt(), 120);
+
+        window->setProperty("lastVisibility", int(QWindow::FullScreen));
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "saveWindowState"));
+        geometry = backend.windowGeometry();
+        QCOMPARE(geometry.value(QStringLiteral("fullScreen")).toBool(), true);
+        QCOMPARE(geometry.value(QStringLiteral("maximized")).toBool(), false);
+        // Still the windowed size, not the screen's.
+        QCOMPARE(geometry.value(QStringLiteral("width")).toInt(), 900);
+        QCOMPARE(geometry.value(QStringLiteral("height")).toInt(), 600);
+
+        window->setProperty("lastVisibility", int(QWindow::Windowed));
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "saveWindowState"));
+        geometry = backend.windowGeometry();
+        QCOMPARE(geometry.value(QStringLiteral("maximized")).toBool(), false);
+        QCOMPARE(geometry.value(QStringLiteral("fullScreen")).toBool(), false);
+
+        QSettings().remove(QStringLiteral("window"));
     }
 
     void headingFormats() {
