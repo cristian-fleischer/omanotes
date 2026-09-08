@@ -30,9 +30,9 @@ The buffer is always your Markdown. These are drawn over it, never in it.
 | `[text](url)`, `![alt](src)` | The text, underlined in the accent colour. Ctrl+click opens it. |
 | ` ```lang ` | A slab behind the code, syntax highlighted, the fence rows folded away. |
 | `---` | A rule across the page. |
-| `* item` | A bullet. `-` and `+` are left alone. |
-| `- [ ]`, `- [x]` | A checkbox. Click it to toggle. |
-| `\| a \| b \|` | A table: slab, bold header, rules under the header and down each column. |
+| `* item` | A bullet drawn in the asterisk's own cell. `-` and `+` are left alone. |
+| `- [ ]`, `[ ]` | A checkbox, with or without a list marker. Click it to toggle. |
+| `\| a \| b \|` | A table: slab, bold header, a rule under it, and column rules once the source lines up. |
 
 Anything folded away comes back when the caret is on its line, or anywhere
 inside the fenced block, so it can still be edited.
@@ -42,11 +42,20 @@ inside the fenced block, so it can still be edited.
 Fenced blocks with a language are coloured by [Lexilla](https://github.com/ScintillaOrg/lexilla),
 vendored and linked statically in `third_party/lexilla`, so the package still
 depends only on Qt and the portal. PHP and Blade, JavaScript and the C family,
-Bash, JSON, Python, SQL. Anything else, `text` included, is left plain.
+Bash, JSON, YAML, Python, SQL, and the properties family that covers `.env`,
+`ini`, `conf` and `toml`. Anything else, `text` included, is left plain.
 
 `src/codesyntaxhighlighter.h` is the whole interface between the Markdown
 highlighter and the lexer: a list of languages and a `tokenize()` returning
 spans. Replacing Lexilla means writing one more adapter.
+
+## Tables
+
+A table is padded so its columns line up when you type in one and move the caret
+out, or on `Ctrl+Shift+T`. Never on open and never on a visit, so a file you only
+read stays byte for byte what it was, and one undo puts the table back as it was
+written. Column rules are drawn only through a table that lines up: half a grid
+reads worse than none.
 
 ## The vault
 
@@ -55,6 +64,9 @@ folder tree, at full depth, skipping dotfiles and dot-directories. Which folders
 are closed is remembered, and opening a note inside a closed one opens the way
 down to it. Typing in the filter flattens the tree to the matches. Set the root
 from the folder icon in the sidebar footer; the default is `$HOME/Notes`.
+
+The filter matches the path as you type, and a moment later also what is written
+inside the notes, using ripgrep if it is installed and grep otherwise.
 
 Notes with unsaved changes are marked with a dot, and a draft that has no file
 behind it yet gets a row of its own at the top.
