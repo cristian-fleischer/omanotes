@@ -80,9 +80,13 @@ compiled into the binary, so it is there whether or not it is installed on the
 system.
 
 `Ctrl+Shift+F` picks a different family for the writing surface; the footer and
-the dialogs stay on the bundled one. Pick a proportional face and tables and
-fenced code still line up: the highlighter falls back to the system fixed-pitch
-font for those, since columns only align while every glyph has the same advance.
+the dialogs stay on the bundled one.
+
+Fenced code is rendered in a font of its own, because iA Writer Mono S has no
+box-drawing glyphs and a diagram in a fence needs them to join into continuous
+rules. The choice is the editor's font when it can draw them, otherwise the best
+installed monospace that can. `typography/codeFontFamily` pins one. Tables use
+the editor's font whenever it is monospaced, since a pipe never joins anyway.
 
 Text also follows the desktop text size — `omarchy display text size`, or GNOME's
 `text-scaling-factor` — and re-flows without a restart. The default of 12px leaves
