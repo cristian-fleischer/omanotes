@@ -1,7 +1,11 @@
 #pragma once
 
 #include <QList>
+#include "codesyntaxhighlighter.h"
+
 #include <QColor>
+#include <QHash>
+#include <memory>
 #include <QRegularExpression>
 #include <QSyntaxHighlighter>
 #include <QTextCharFormat>
@@ -19,7 +23,19 @@ public:
     // Carried on the block's user state so the next block knows whether it is
     // inside a fence, and so Backend::hiddenRangesAt can tell that a line of
     // code is not a line of Markdown.
+    //
+    // A fenced line also carries which language it is in and where the lexer
+    // had got to at the end of the line, packed into the same int because that
+    // is all QSyntaxHighlighter gives us:
+    //
+    //   bits 0-7   flag, Normal or InFencedCode
+    //   bits 8-15  index into the languages seen in this document
+    //   bits 16-23 the code highlighter's own state, for block comments
     enum BlockState { Normal = 0, InFencedCode = 1 };
+
+    static bool isFencedState(int state) {
+        return state > 0 && (state & 0xff) == InFencedCode;
+    }
 
     struct Span {
         int start;
@@ -83,6 +99,8 @@ private slots:
 private:
     void rebuildFormats();
     bool highlightFencedCode(const QString &text);
+    int highlightCode(const QString &text, int languageIndex, int previousState);
+    int languageIndexFor(const QString &language);
     bool highlightTableRow(const QString &text);
     void highlightMarkers(const QString &text);
     void highlightSetextContent(const QString &text);
@@ -107,6 +125,9 @@ private:
     QTextCharFormat m_strikeFormat;
     QTextCharFormat m_codeFormat;
     QTextCharFormat m_codeBlockFormat;
+    QHash<CodeSyntaxHighlighter::Token, QTextCharFormat> m_codeTokenFormats;
+    std::unique_ptr<CodeSyntaxHighlighter> m_code;
+    QStringList m_fenceLanguages;
     QTextCharFormat m_fenceFormat;
     QTextCharFormat m_tableFormat;
     QTextCharFormat m_tablePipeFormat;

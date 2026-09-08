@@ -405,7 +405,7 @@ QVariantList Backend::hiddenRangesAt(int position) const {
     // over the asterisks in a shell glob.
     const QList<MarkdownHighlighter::InlineMarkup> markup =
         MarkdownHighlighter::inlineMarkup(
-            block.text(), block.userState() == MarkdownHighlighter::InFencedCode);
+            block.text(), MarkdownHighlighter::isFencedState(block.userState()));
     for (const MarkdownHighlighter::InlineMarkup &item : markup) {
         for (const MarkdownHighlighter::Span &marker : item.markers) {
             spans.append({lineStart + marker.start,
@@ -882,7 +882,7 @@ void Backend::scheduleWordCount() {
 // Line height is a block property, so it is the one part of the styling the
 // highlighter cannot do: QSyntaxHighlighter only sets character formats.
 bool Backend::isCodeBlock(const QTextBlock &block) const {
-    if (block.userState() == MarkdownHighlighter::InFencedCode)
+    if (MarkdownHighlighter::isFencedState(block.userState()))
         return true;
     // A closing fence carries the Normal state, so the row itself still has to
     // be recognised. This runs for every block of the document on every edit,

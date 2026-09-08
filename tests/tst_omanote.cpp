@@ -13,6 +13,7 @@
 #include <QQuickStyle>
 
 #include "backend.h"
+#include "lexillacodehighlighter.h"
 #include "markdownhighlighter.h"
 #include "vaultmodel.h"
 
@@ -213,6 +214,108 @@ private slots:
     // Box-drawing characters join only when the font draws them at least as
     // tall as its own line. Having the glyphs is not enough: Noto Sans Mono has
     // them at 0.92 of its line spacing, so every diagram comes out dashed.
+    void fencedCodeIsSyntaxHighlighted() {
+        QTextDocument document;
+        document.setDefaultFont(bodyFont());
+        MarkdownHighlighter highlighter(&document);
+        setDocumentText(document, QStringLiteral(
+            "```php\n"
+            "// a comment\n"
+            "$name = 'value';\n"
+            "```\n"
+            "\n"
+            "```text\n"
+            "// not code\n"
+            "```"));
+
+        const QBrush comment = formatAt(document, 1, 0).foreground();
+        const QBrush code = formatAt(document, 2, 0).foreground();
+        QVERIFY(comment.style() != Qt::NoBrush);
+        // A comment is not coloured like the code beside it.
+        QVERIFY(comment != code);
+        QVERIFY(formatAt(document, 1, 0).fontItalic());
+
+        // The string in the second line is coloured too, differently again.
+        const QBrush string = formatAt(document, 2, 9).foreground();
+        QVERIFY(string != code);
+        QVERIFY(string != comment);
+
+        // `text` is not a language, so the same line is left alone there.
+        QCOMPARE(formatAt(document, 6, 0).foreground(),
+                 formatAt(document, 6, 5).foreground());
+        QVERIFY(!formatAt(document, 6, 0).fontItalic());
+
+        // The language rides along in the block state.
+        QVERIFY(MarkdownHighlighter::isFencedState(
+            document.findBlockByNumber(1).userState()));
+        QCOMPARE((document.findBlockByNumber(1).userState() >> 8) & 0xff, 1);
+        QCOMPARE((document.findBlockByNumber(6).userState() >> 8) & 0xff, 0);
+    }
+
+    void lexillaTokenizesCode() {
+        LexillaCodeHighlighter highlighter;
+        QVERIFY(highlighter.supports(QStringLiteral("php")));
+        QVERIFY(highlighter.supports(QStringLiteral("PHP")));
+        QVERIFY(highlighter.supports(QStringLiteral("bash")));
+        QVERIFY(!highlighter.supports(QStringLiteral("text")));
+        QVERIFY(!highlighter.supports(QString()));
+
+        const auto kinds = [&](const QString &language, const QString &line) {
+            int state = 0;
+            QList<CodeSyntaxHighlighter::Token> tokens;
+            for (const CodeSyntaxHighlighter::Span &span :
+                     highlighter.tokenize(language, line, state))
+                tokens.append(span.token);
+            return tokens;
+        };
+
+        QVERIFY(kinds(QStringLiteral("php"),
+                      QStringLiteral("$x = 'text'; // note"))
+                    .contains(CodeSyntaxHighlighter::Token::Comment));
+        // LexHTML keeps PHP keywords in word list 4, not 0. Getting that wrong
+        // colours strings and comments but leaves every keyword plain.
+        QVERIFY(kinds(QStringLiteral("php"), QStringLiteral("function f() { return 1; }"))
+                    .contains(CodeSyntaxHighlighter::Token::Keyword));
+        QVERIFY(kinds(QStringLiteral("bash"), QStringLiteral("# a comment"))
+                    .contains(CodeSyntaxHighlighter::Token::Comment));
+        QVERIFY(kinds(QStringLiteral("python"), QStringLiteral("def f(): return 42"))
+                    .contains(CodeSyntaxHighlighter::Token::Keyword));
+        // A JSON key is a property name, not a string; the value is the string.
+        QVERIFY(kinds(QStringLiteral("json"), QStringLiteral("{\"a\": \"b\"}"))
+                    .contains(CodeSyntaxHighlighter::Token::String));
+        QVERIFY(kinds(QStringLiteral("json"), QStringLiteral("{\"a\": 1}"))
+                    .contains(CodeSyntaxHighlighter::Token::Number));
+
+        // Spans stay inside the line and never overlap.
+        int state = 0;
+        const QString line = QStringLiteral("function greet($who) { echo \"hi $who\"; }");
+        const QList<CodeSyntaxHighlighter::Span> spans =
+            highlighter.tokenize(QStringLiteral("php"), line, state);
+        QVERIFY(!spans.isEmpty());
+        int previousEnd = 0;
+        for (const CodeSyntaxHighlighter::Span &span : spans) {
+            QVERIFY(span.start >= previousEnd);
+            QVERIFY(span.length > 0);
+            QVERIFY(span.start + span.length <= line.length());
+            previousEnd = span.start + span.length;
+        }
+
+        // State carries a block comment across lines.
+        int blockState = 0;
+        highlighter.tokenize(QStringLiteral("javascript"),
+                             QStringLiteral("/* opened here"), blockState);
+        const QList<CodeSyntaxHighlighter::Span> continued =
+            highlighter.tokenize(QStringLiteral("javascript"),
+                                 QStringLiteral("still inside"), blockState);
+        QVERIFY(!continued.isEmpty());
+        QCOMPARE(continued.constFirst().token, CodeSyntaxHighlighter::Token::Comment);
+
+        // An unknown language yields nothing rather than misleading colour.
+        int unknown = 0;
+        QVERIFY(highlighter.tokenize(QStringLiteral("brainfuck"),
+                                     QStringLiteral("+++."), unknown).isEmpty());
+    }
+
     void codeFontDrawsContinuousBoxes() {
         QVERIFY(!MarkdownHighlighter::drawsContinuousBoxes(QString()));
         QVERIFY(!MarkdownHighlighter::drawsContinuousBoxes(
@@ -424,10 +527,12 @@ private slots:
         // background, so what the highlighter leaves here is the monospace.
         QVERIFY(!formatAt(document, 1, 0).fontFamilies().toStringList().isEmpty());
         QVERIFY(!formatAt(document, 2, 0).fontFamilies().toStringList().isEmpty());
-        QCOMPARE(document.findBlockByNumber(1).userState(),
-                 int(MarkdownHighlighter::InFencedCode));
-        QCOMPARE(document.findBlockByNumber(3).userState(),
-                 int(MarkdownHighlighter::Normal));
+        // The state also carries the language and the lexer's own position, so
+        // it is read through the helper rather than compared to the flag.
+        QVERIFY(MarkdownHighlighter::isFencedState(
+            document.findBlockByNumber(1).userState()));
+        QVERIFY(!MarkdownHighlighter::isFencedState(
+            document.findBlockByNumber(3).userState()));
 
         // Past the closing fence, emphasis works again.
         QVERIFY(formatAt(document, 4, 7).fontItalic());

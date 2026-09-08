@@ -8,13 +8,18 @@ HEADERS += \
     src/backend.h \
     src/markdownhighlighter.h \
     src/systemtheme.h \
-    src/vaultmodel.h
+    src/vaultmodel.h \
+    src/codesyntaxhighlighter.h \
+    src/lexillacodehighlighter.h
 
 SOURCES += \
     src/main.cpp \
     src/backend.cpp \
     src/markdownhighlighter.cpp \
     src/systemtheme.cpp \
-    src/vaultmodel.cpp
+    src/vaultmodel.cpp \
+    src/lexillacodehighlighter.cpp
+
+include(lexilla.pri)
 
 RESOURCES += src/resources.qrc

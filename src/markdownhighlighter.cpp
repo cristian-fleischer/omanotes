@@ -1,5 +1,7 @@
 #include "markdownhighlighter.h"
 
+#include "lexillacodehighlighter.h"
+
 #include <QColor>
 #include <QFont>
 #include <QFontDatabase>
@@ -200,7 +202,7 @@ void MarkdownHighlighter::applyBlockState(int state) {
 }
 
 MarkdownHighlighter::MarkdownHighlighter(QTextDocument *document)
-    : QSyntaxHighlighter(document) {
+    : QSyntaxHighlighter(document), m_code(std::make_unique<LexillaCodeHighlighter>()) {
     rebuildFormats();
 }
 
@@ -363,6 +365,45 @@ void MarkdownHighlighter::rebuildFormats() {
     m_linkFormat.setForeground(link);
     m_linkFormat.setFontUnderline(true);
 
+    // Code token colours. Keywords take the theme's accent so a code block
+    // belongs to the palette; the rest are a restrained fixed set, the way the
+    // marker and search colours already are.
+    const auto tokenFormat = [this](const QColor &colour, bool italic = false,
+                                    bool bold = false) {
+        QTextCharFormat format;
+        format.setForeground(colour);
+        format.setFontFamilies(m_codeFamilies);
+        if (italic)
+            format.setFontItalic(true);
+        if (bold)
+            format.setFontWeight(QFont::Bold);
+        return format;
+    };
+
+    using Token = CodeSyntaxHighlighter::Token;
+    m_codeTokenFormats.clear();
+    m_codeTokenFormats.insert(Token::Comment, tokenFormat(marker, true));
+    m_codeTokenFormats.insert(Token::Keyword, tokenFormat(link, false, true));
+    m_codeTokenFormats.insert(Token::Type, tokenFormat(link));
+    m_codeTokenFormats.insert(Token::Tag, tokenFormat(link));
+    m_codeTokenFormats.insert(
+        Token::String, tokenFormat(m_darkMode ? QColor(QStringLiteral("#98c379"))
+                                              : QColor(QStringLiteral("#3f7f3f"))));
+    m_codeTokenFormats.insert(
+        Token::Number, tokenFormat(m_darkMode ? QColor(QStringLiteral("#d19a66"))
+                                              : QColor(QStringLiteral("#985c0a"))));
+    m_codeTokenFormats.insert(
+        Token::Preprocessor, tokenFormat(m_darkMode ? QColor(QStringLiteral("#c678dd"))
+                                                    : QColor(QStringLiteral("#8b3fa8"))));
+    m_codeTokenFormats.insert(
+        Token::Attribute, tokenFormat(m_darkMode ? QColor(QStringLiteral("#56b6c2"))
+                                                 : QColor(QStringLiteral("#0b7285"))));
+    m_codeTokenFormats.insert(
+        Token::Error, tokenFormat(m_darkMode ? QColor(QStringLiteral("#e06c75"))
+                                             : QColor(QStringLiteral("#b3261e"))));
+    m_codeTokenFormats.insert(Token::Operator, tokenFormat(marker));
+    m_codeTokenFormats.insert(Token::Identifier, tokenFormat(text));
+
     m_searchFormat = QTextCharFormat();
     m_searchFormat.setBackground(m_darkMode ? QColor(QStringLiteral("#725b18"))
                                             : QColor(QStringLiteral("#ffe58a")));
@@ -396,8 +437,42 @@ void MarkdownHighlighter::highlightBlock(const QString &text) {
 
 // Everything between a pair of fences is code, so no inline rule may fire
 // inside it. Without this a `*` in a shell glob comes out italic.
+int MarkdownHighlighter::languageIndexFor(const QString &language) {
+    const QString wanted = language.trimmed().toLower();
+    if (wanted.isEmpty() || !m_code || !m_code->supports(wanted))
+        return 0;
+
+    const int existing = m_fenceLanguages.indexOf(wanted);
+    if (existing >= 0)
+        return existing + 1;
+    // 255 languages in one note is not a thing, but the index has one byte.
+    if (m_fenceLanguages.size() >= 254)
+        return 0;
+    m_fenceLanguages.append(wanted);
+    return int(m_fenceLanguages.size());
+}
+
+// Colour one line of code over the block format already applied to it, and
+// return where the lexer got to so the next line can carry on.
+int MarkdownHighlighter::highlightCode(const QString &text, int languageIndex,
+                                       int previousState) {
+    if (languageIndex <= 0 || languageIndex > m_fenceLanguages.size() || !m_code)
+        return 0;
+
+    int state = previousState;
+    const QList<CodeSyntaxHighlighter::Span> spans =
+        m_code->tokenize(m_fenceLanguages.at(languageIndex - 1), text, state);
+    for (const CodeSyntaxHighlighter::Span &span : spans) {
+        const auto format = m_codeTokenFormats.constFind(span.token);
+        if (format != m_codeTokenFormats.constEnd())
+            setFormat(span.start, span.length, *format);
+    }
+    return state & 0xff;
+}
+
 bool MarkdownHighlighter::highlightFencedCode(const QString &text) {
-    const bool wasInside = previousBlockState() == InFencedCode;
+    const int previous = previousBlockState();
+    const bool wasInside = isFencedState(previous);
     const bool onFenceLine = isFenceLine(text);
 
     if (!wasInside && !onFenceLine) {
@@ -405,11 +480,33 @@ bool MarkdownHighlighter::highlightFencedCode(const QString &text) {
         return false;
     }
 
-    applyBlockState(wasInside && onFenceLine ? Normal : InFencedCode);
     // The fence rows and the language tag stay dim; the code between them takes
-    // the block background. An empty line inside a fence has no characters to
-    // paint, so the background breaks there.
-    setFormat(0, text.length(), onFenceLine ? m_fenceFormat : m_codeBlockFormat);
+    // the block format. An empty line inside a fence has no characters to
+    // paint, which is why the slab behind it is drawn in QML.
+    if (wasInside && onFenceLine) {
+        applyBlockState(Normal);
+        setFormat(0, text.length(), m_fenceFormat);
+        return true;
+    }
+
+    int languageIndex = 0;
+    int codeState = 0;
+
+    if (onFenceLine) {
+        // The info string sits on the opening fence, and every line under it
+        // needs to know what it said, so it travels in the block state.
+        static const QRegularExpression infoRe(
+            QStringLiteral("^\\s*(?:`{3,}|~{3,})\\s*([A-Za-z0-9_+#.-]*)"));
+        languageIndex = languageIndexFor(infoRe.match(text).captured(1));
+        setFormat(0, text.length(), m_fenceFormat);
+    } else {
+        languageIndex = (previous >> 8) & 0xff;
+        codeState = (previous >> 16) & 0xff;
+        setFormat(0, text.length(), m_codeBlockFormat);
+        codeState = highlightCode(text, languageIndex, codeState);
+    }
+
+    applyBlockState(InFencedCode | (languageIndex << 8) | (codeState << 16));
     return true;
 }
 
