@@ -61,12 +61,17 @@ local work.
 Zoom, the width toggle, the editor font, the window's size and whether it was
 left full screen all come back on the next run.
 
-## Line height
+## Line height and the code slab
 
 Prose is set at 140 percent of its own size. Fenced code and the fence rows
-around it are tighter at 125, so a block reads as one slab, and table rows
-tighter still at 120, so they read as a grid. All three are settings under
-`typography/` in the config, since the right answer depends on the font.
+around it are tighter at 125, and table rows tighter still at 120, so they read
+as a grid. All three are settings under `typography/` in the config, since the
+right answer depends on the font.
+
+The background behind a fenced block is drawn as one rectangle behind the
+editor, not as a background on the characters, so it covers short lines, empty
+lines and the leading between rows alike. Its colour is a step down in lightness
+from the page, so it follows the palette rather than sitting on top of it.
 
 ## Fonts
 
