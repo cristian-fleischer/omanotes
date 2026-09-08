@@ -1,5 +1,8 @@
 #include <QtTest>
 #include <QFont>
+#include <QTextBlock>
+#include <QTextDocument>
+#include <QTextLayout>
 #include <QQmlComponent>
 #include <QQmlContext>
 #include <QQmlEngine>
@@ -21,6 +24,157 @@ private slots:
         QSettings::setDefaultFormat(QSettings::IniFormat);
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
                            m_settingsDirectory.path());
+    }
+
+    void headingFormats() {
+        QTextDocument document;
+        document.setDefaultFont(bodyFont());
+        MarkdownHighlighter highlighter(&document);
+        setDocumentText(document, QStringLiteral("## Heading\nbody"));
+
+        const QTextCharFormat content = formatAt(document, 0, 3);
+        QCOMPARE(content.fontPointSize(), 12.0 * 1.4);
+        QCOMPARE(content.fontWeight(), int(QFont::Bold));
+
+        // The `##` and the space after it collapse to nothing, or the heading
+        // would sit indented by its own syntax.
+        QCOMPARE(formatAt(document, 0, 0).fontPointSize(), 1.0);
+        QVERIFY(formatAt(document, 0, 0).fontLetterSpacing() < 0);
+        QCOMPARE(formatAt(document, 0, 2).fontPointSize(), 1.0);
+
+        QCOMPARE(formatAt(document, 1, 0).fontPointSize(), 0.0);
+
+        // And the caret is told about them, or it gets stuck at column zero.
+        const auto markup = MarkdownHighlighter::inlineMarkup(QStringLiteral("## Heading"));
+        QCOMPARE(markup.size(), 1);
+        QVERIFY(markup.at(0).kind == MarkdownHighlighter::InlineKind::Heading);
+        QCOMPARE(markup.at(0).level, 2);
+        QCOMPARE(markup.at(0).markers[0].start, 0);
+        QCOMPARE(markup.at(0).markers[0].length, 3);
+
+        setDocumentText(document, QStringLiteral("# One\n###### Six"));
+        QCOMPARE(formatAt(document, 0, 2).fontPointSize(), 12.0 * 1.6);
+        QCOMPARE(formatAt(document, 1, 7).fontPointSize(), 12.0);
+    }
+
+    void fencedCodeState() {
+        QTextDocument document;
+        MarkdownHighlighter highlighter(&document);
+        setDocumentText(document, QStringLiteral(
+            "```sh\nls *.md\nnot *italic* here\n```\nafter *italic*"));
+
+        // A star inside a fence is a glob, not emphasis.
+        QVERIFY(!formatAt(document, 1, 4).fontItalic());
+        QVERIFY(!formatAt(document, 2, 5).fontItalic());
+
+        // The fence covers every line between its markers.
+        QVERIFY(formatAt(document, 1, 0).background().style() != Qt::NoBrush);
+        QVERIFY(formatAt(document, 2, 0).background().style() != Qt::NoBrush);
+        QCOMPARE(document.findBlockByNumber(1).userState(),
+                 int(MarkdownHighlighter::InFencedCode));
+        QCOMPARE(document.findBlockByNumber(3).userState(),
+                 int(MarkdownHighlighter::Normal));
+
+        // Past the closing fence, emphasis works again.
+        QVERIFY(formatAt(document, 4, 7).fontItalic());
+    }
+
+    void strikethroughCaret() {
+        const auto markup = MarkdownHighlighter::inlineMarkup(QStringLiteral("a ~~gone~~ b"));
+        QCOMPARE(markup.size(), 1);
+        QVERIFY(markup.at(0).kind == MarkdownHighlighter::InlineKind::Strikethrough);
+        QCOMPARE(markup.at(0).content.start, 4);
+        QCOMPARE(markup.at(0).content.length, 4);
+        QCOMPARE(markup.at(0).markers[0].start, 2);
+        QCOMPARE(markup.at(0).markers[0].length, 2);
+        QCOMPARE(markup.at(0).markers[1].start, 8);
+        QCOMPARE(markup.at(0).markers[1].length, 2);
+
+        // Inside a fence the tildes are visible text, so no range is reported
+        // and the caret walks over them one character at a time.
+        QVERIFY(MarkdownHighlighter::inlineMarkup(QStringLiteral("a ~~gone~~ b"), true).isEmpty());
+
+        QTextDocument document;
+        MarkdownHighlighter highlighter(&document);
+        setDocumentText(document, QStringLiteral("a ~~gone~~ b"));
+        QVERIFY(formatAt(document, 0, 4).fontStrikeOut());
+        QCOMPARE(formatAt(document, 0, 2).fontPointSize(), 1.0);
+    }
+
+    void tableMonospace() {
+        QTextDocument document;
+        MarkdownHighlighter highlighter(&document);
+        setDocumentText(document, QStringLiteral(
+            "| a | **b** |\n|---|-------|\n| 1 | 2     |\nplain **b**"));
+
+        const QString row = document.findBlockByNumber(0).text();
+        const QVariant families = formatAt(document, 0, 0).fontFamilies();
+        QVERIFY(!families.toStringList().isEmpty());
+        for (int i = 0; i < row.length(); ++i) {
+            QCOMPARE(formatAt(document, 0, i).fontFamilies().toStringList(),
+                     families.toStringList());
+        }
+
+        // Emphasis inside a cell is left as source, so the columns stay aligned.
+        QVERIFY(formatAt(document, 0, 6).fontWeight() != int(QFont::Bold));
+        QVERIFY(MarkdownHighlighter::inlineMarkup(row).isEmpty());
+        QCOMPARE(formatAt(document, 3, 8).fontWeight(), int(QFont::Bold));
+
+        // Pipes and the separator row are dimmed away from the content.
+        QVERIFY(formatAt(document, 0, 0).foreground() != formatAt(document, 0, 2).foreground());
+        QCOMPARE(formatAt(document, 1, 1).foreground(), formatAt(document, 0, 0).foreground());
+    }
+
+    void taskItemFormats() {
+        QTextDocument document;
+        MarkdownHighlighter highlighter(&document);
+        setDocumentText(document, QStringLiteral("- [x] done\n- [ ] todo"));
+
+        const QBrush markerColor = formatAt(document, 0, 0).foreground();
+        QVERIFY(markerColor.style() != Qt::NoBrush);
+        QCOMPARE(formatAt(document, 0, 2).foreground(), markerColor);
+        QCOMPARE(formatAt(document, 0, 4).foreground(), markerColor);
+        QCOMPARE(formatAt(document, 0, 3).fontWeight(), int(QFont::Bold));
+
+        QVERIFY(formatAt(document, 1, 3).fontWeight() != int(QFont::Bold));
+        QCOMPARE(formatAt(document, 1, 3).foreground(), markerColor);
+        QVERIFY(formatAt(document, 0, 6).foreground() != markerColor);
+    }
+
+    void imageMarkers() {
+        const auto markup = MarkdownHighlighter::inlineMarkup(
+            QStringLiteral("see ![alt text](pic.png) here"));
+        QCOMPARE(markup.size(), 1);
+        QVERIFY(markup.at(0).kind == MarkdownHighlighter::InlineKind::Image);
+        QCOMPARE(markup.at(0).content.start, 6);
+        QCOMPARE(markup.at(0).content.length, 8);
+        QCOMPARE(markup.at(0).markers[0].start, 4);
+        QCOMPARE(markup.at(0).markers[0].length, 2);
+        QCOMPARE(markup.at(0).markers[1].start, 14);
+        QCOMPARE(markup.at(0).markers[1].length, 10);
+
+        QTextDocument document;
+        MarkdownHighlighter highlighter(&document);
+        setDocumentText(document, QStringLiteral("see ![alt text](pic.png) here"));
+        QVERIFY(formatAt(document, 0, 6).fontUnderline());
+        QCOMPARE(formatAt(document, 0, 4).fontPointSize(), 1.0);
+    }
+
+    void setextHeadings() {
+        QTextDocument document;
+        document.setDefaultFont(bodyFont());
+        MarkdownHighlighter highlighter(&document);
+        setDocumentText(document, QStringLiteral("Title\n=====\n\nSub\n---\n\nbody\n\n---"));
+
+        QCOMPARE(formatAt(document, 0, 0).fontPointSize(), 12.0 * 1.6);
+        QCOMPARE(formatAt(document, 3, 0).fontPointSize(), 12.0 * 1.4);
+
+        // The underline reads as a marker, the way a thematic break does.
+        QVERIFY(formatAt(document, 1, 0).foreground().style() != Qt::NoBrush);
+        QVERIFY(formatAt(document, 4, 0).foreground().style() != Qt::NoBrush);
+
+        // A rule with a blank line above it is a rule, not an underline.
+        QCOMPARE(formatAt(document, 6, 0).fontPointSize(), 0.0);
     }
 
     void vaultModelLists() {
@@ -566,6 +720,36 @@ private:
             return nullptr;
         }
         return component->create();
+    }
+
+    // A highlighter's formats only reach the block layout when the document is
+    // laid out, so ask for a layout before reading any of them back.
+    static void setDocumentText(QTextDocument &document, const QString &text) {
+        document.setPlainText(text);
+        document.setTextWidth(600);
+        (void)document.size();
+    }
+
+    static QFont bodyFont() {
+        QFont font(QStringLiteral("monospace"));
+        font.setPointSizeF(12.0);
+        return font;
+    }
+
+    // Syntax highlighting lives in the block layout's format ranges, not in the
+    // characters' own formats, so read it back from there.
+    static QTextCharFormat formatAt(const QTextDocument &document, int blockNumber,
+                                    int position) {
+        QTextCharFormat merged;
+        const QTextBlock block = document.findBlockByNumber(blockNumber);
+        if (!block.isValid() || !block.layout())
+            return merged;
+        const QList<QTextLayout::FormatRange> ranges = block.layout()->formats();
+        for (const QTextLayout::FormatRange &range : ranges) {
+            if (position >= range.start && position < range.start + range.length)
+                merged.merge(range.format);
+        }
+        return merged;
     }
 
     static bool writeNote(const QString &root, const QString &relativePath) {
