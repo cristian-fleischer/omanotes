@@ -7,6 +7,7 @@
 
 #include "backend.h"
 #include "markdownhighlighter.h"
+#include "vaultmodel.h"
 
 class OmanoteTest : public QObject {
     Q_OBJECT
@@ -20,6 +21,116 @@ private slots:
         QSettings::setDefaultFormat(QSettings::IniFormat);
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
                            m_settingsDirectory.path());
+    }
+
+    void vaultModelLists() {
+        QTemporaryDir vault;
+        QVERIFY(vault.isValid());
+        QVERIFY(writeNote(vault.path(), QStringLiteral("Alpha.md")));
+        QVERIFY(writeNote(vault.path(), QStringLiteral("zeta.markdown")));
+        QVERIFY(writeNote(vault.path(), QStringLiteral("projects/Beta.md")));
+        QVERIFY(writeNote(vault.path(), QStringLiteral("projects/deep/Gamma.md")));
+        QVERIFY(writeNote(vault.path(), QStringLiteral("notes.txt")));
+        QVERIFY(writeNote(vault.path(), QStringLiteral(".hidden.md")));
+        QVERIFY(writeNote(vault.path(), QStringLiteral(".git/objects/pack.md")));
+        QVERIFY(writeNote(vault.path(), QStringLiteral(".obsidian/workspace.md")));
+
+        VaultModel model;
+        model.setRoot(vault.path());
+
+        QCOMPARE(model.count(), 4);
+        QVERIFY(!model.truncated());
+        QCOMPARE(titlesOf(model),
+                 (QStringList{QStringLiteral("Alpha"), QStringLiteral("Beta"),
+                              QStringLiteral("Gamma"), QStringLiteral("zeta")}));
+
+        // Nesting shows as dim secondary text; a top-level note has none.
+        QCOMPARE(roleOf(model, 0, VaultModel::RelativeDirRole).toString(), QString());
+        QCOMPARE(roleOf(model, 1, VaultModel::RelativeDirRole).toString(),
+                 QStringLiteral("projects"));
+        QCOMPARE(roleOf(model, 2, VaultModel::RelativeDirRole).toString(),
+                 QStringLiteral("projects/deep"));
+
+        // A symlink out of the vault is not part of the vault.
+        QTemporaryDir outside;
+        QVERIFY(outside.isValid());
+        QVERIFY(writeNote(outside.path(), QStringLiteral("Elsewhere.md")));
+        QVERIFY(QFile::link(outside.filePath(QStringLiteral("Elsewhere.md")),
+                            QDir(vault.path()).filePath(QStringLiteral("Elsewhere.md"))));
+        model.refresh();
+        QCOMPARE(model.count(), 4);
+
+        // The current file is the one the editor has open.
+        model.setCurrentPath(roleOf(model, 1, VaultModel::PathRole).toString());
+        QCOMPARE(roleOf(model, 0, VaultModel::IsCurrentRole).toBool(), false);
+        QCOMPARE(roleOf(model, 1, VaultModel::IsCurrentRole).toBool(), true);
+        QCOMPARE(model.rowForPath(model.pathAt(1)), 1);
+
+        const QString created = model.createNote();
+        QVERIFY(!created.isEmpty());
+        QCOMPARE(QFileInfo(created).fileName(), QStringLiteral("untitled.md"));
+        QCOMPARE(QFileInfo(model.createNote()).fileName(), QStringLiteral("untitled-2.md"));
+        QCOMPARE(model.count(), 6);
+    }
+
+    void vaultModelHonoursTheFileCap() {
+        QTemporaryDir vault;
+        QVERIFY(vault.isValid());
+        for (int i = 0; i < VaultModel::maximumFiles + 1; ++i)
+            QVERIFY(writeNote(vault.path(), QStringLiteral("note-%1.md").arg(i, 5, 10, QLatin1Char('0'))));
+
+        VaultModel model;
+        model.setRoot(vault.path());
+        QCOMPARE(model.totalCount(), VaultModel::maximumFiles);
+        QVERIFY(model.truncated());
+    }
+
+    void vaultModelFilter() {
+        QTemporaryDir vault;
+        QVERIFY(vault.isValid());
+        QVERIFY(writeNote(vault.path(), QStringLiteral("Fusion reactor.md")));
+        QVERIFY(writeNote(vault.path(), QStringLiteral("Groceries.md")));
+        QVERIFY(writeNote(vault.path(), QStringLiteral("archive/2024/confusion.md")));
+
+        VaultModel model;
+        model.setRoot(vault.path());
+        QCOMPARE(model.count(), 3);
+
+        // Case-insensitive substring, matched against the relative path, so a
+        // directory name is as good a handle as a title.
+        model.setFilter(QStringLiteral("fusion"));
+        QCOMPARE(model.count(), 2);
+        model.setFilter(QStringLiteral("FUSION R"));
+        QCOMPARE(model.count(), 1);
+        QCOMPARE(roleOf(model, 0, VaultModel::TitleRole).toString(),
+                 QStringLiteral("Fusion reactor"));
+        model.setFilter(QStringLiteral("archive/2024"));
+        QCOMPARE(model.count(), 1);
+        model.setFilter(QString());
+        QCOMPARE(model.count(), 3);
+    }
+
+    void vaultModelWatch() {
+        QTemporaryDir vault;
+        QVERIFY(vault.isValid());
+        QVERIFY(writeNote(vault.path(), QStringLiteral("first.md")));
+        QVERIFY(writeNote(vault.path(), QStringLiteral("nested/second.md")));
+
+        VaultModel model;
+        model.setRoot(vault.path());
+        QCOMPARE(model.count(), 2);
+
+        QVERIFY(writeNote(vault.path(), QStringLiteral("nested/third.md")));
+        QTRY_COMPARE_WITH_TIMEOUT(model.count(), 3, 3000);
+
+        QVERIFY(QFile::remove(QDir(vault.path()).filePath(QStringLiteral("first.md"))));
+        QTRY_COMPARE_WITH_TIMEOUT(model.count(), 2, 3000);
+
+        // A directory created after the first scan is watched too.
+        QVERIFY(writeNote(vault.path(), QStringLiteral("later/fourth.md")));
+        QTRY_COMPARE_WITH_TIMEOUT(model.count(), 3, 3000);
+        QVERIFY(writeNote(vault.path(), QStringLiteral("later/fifth.md")));
+        QTRY_COMPARE_WITH_TIMEOUT(model.count(), 4, 3000);
     }
 
     void preservesLineEndingsAndByteOrderMark() {
@@ -385,6 +496,30 @@ private:
             return nullptr;
         }
         return component->create();
+    }
+
+    static bool writeNote(const QString &root, const QString &relativePath) {
+        const QString path = QDir(root).filePath(relativePath);
+        if (!QDir().mkpath(QFileInfo(path).absolutePath()))
+            return false;
+        QFile file(path);
+        if (!file.open(QIODevice::WriteOnly))
+            return false;
+        file.write("# ");
+        file.write(QFileInfo(path).completeBaseName().toUtf8());
+        file.write("\n");
+        return true;
+    }
+
+    static QVariant roleOf(const VaultModel &model, int row, int role) {
+        return model.data(model.index(row), role);
+    }
+
+    static QStringList titlesOf(const VaultModel &model) {
+        QStringList titles;
+        for (int row = 0; row < model.count(); ++row)
+            titles.append(roleOf(model, row, VaultModel::TitleRole).toString());
+        return titles;
     }
 
     static QString corpusDirectory() {
