@@ -21,9 +21,14 @@ Installs as `omanote`, alongside `omawrite` if you have it.
 
 ## The vault
 
-The sidebar lists every `.md` and `.markdown` file under one directory, at full
-depth, skipping dotfiles and dot-directories. Set it from the folder button in
-the sidebar footer; the default is `$HOME/Notes`.
+The sidebar shows every `.md` and `.markdown` file under one directory as a
+folder tree, at full depth, skipping dotfiles and dot-directories. Which folders
+are closed is remembered, and opening a note inside a closed one opens the way
+down to it. Typing in the filter flattens the tree to the matches. Set the root
+from the folder icon in the sidebar footer; the default is `$HOME/Notes`.
+
+Notes with unsaved changes are marked with a dot, and a draft that has no file
+behind it yet gets a row of its own at the top.
 
 ## Shortcuts
 
@@ -32,6 +37,8 @@ the sidebar footer; the default is `$HOME/Notes`.
 - `Ctrl+O` opens a Markdown file through the portal picker.
 - `Ctrl+L` shows and hides the sidebar, as does the leftmost footer icon. It starts hidden. `Ctrl+Shift+L` focuses its filter field.
 - `Ctrl+Alt+N` creates a new note in the vault root.
+- `Ctrl+=` and `Ctrl+-` scale the text, `Ctrl+0` puts it back, `Ctrl+wheel` does the same with the mouse.
+- `Ctrl+M` drops the 65-character measure and lets the text use the window, as does the rightmost footer icon.
 - `Ctrl+P` opens the system print dialog.
 - `Ctrl+N` opens a new OmaNote window.
 - `Ctrl+Z`, `Ctrl+Shift+Z`, and `Ctrl+Y` handle undo and redo.
