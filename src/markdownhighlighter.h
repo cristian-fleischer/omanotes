@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QList>
+#include <QColor>
 #include <QRegularExpression>
 #include <QSyntaxHighlighter>
 #include <QTextCharFormat>
@@ -49,6 +50,12 @@ public:
     // The ``` or ~~~ row itself. It belongs to the code slab, not to the
     // prose around it.
     static bool isFenceLine(const QString &text);
+
+    // A step away from the page's own colour rather than a fixed grey, so the
+    // code slab keeps the palette's hue whatever the wallpaper does. The fenced
+    // slab is drawn behind the editor from QML; inline code uses it as a
+    // character background.
+    static QColor codeBackgroundFor(const QString &pageBackground, bool darkMode);
 
     // Block numbers whose fence state changed in the last pass, and clears the
     // list. Opening a fence restates every line under it, and nothing else can

@@ -3,6 +3,7 @@
 #include <QTextBlock>
 #include <QTextDocument>
 #include <QTextLayout>
+#include <QColor>
 #include <QFontDatabase>
 #include <QQuickTextDocument>
 #include <QWindow>
@@ -195,6 +196,32 @@ private slots:
     // to restore is the one recorded while it was still on screen.
     // Line height is a block property, so it is the one part of the styling
     // QSyntaxHighlighter cannot set. Backend reads the block's kind instead.
+    // The slab is a step away from the page, not a fixed grey, so it keeps the
+    // palette's hue when the wallpaper changes it.
+    void codeBackgroundFollowsThePage() {
+        const auto lightnessOf = [](const QColor &color) { return color.toHsl().lightnessF(); };
+
+        const QColor page(QStringLiteral("#11131c"));
+        const QColor slab = MarkdownHighlighter::codeBackgroundFor(page.name(), true);
+        QVERIFY(slab.isValid());
+        QVERIFY(lightnessOf(slab) < lightnessOf(page));
+        // Same hue, so it reads as the page rather than as grey pasted on top.
+        QCOMPARE(slab.toHsl().hue(), page.toHsl().hue());
+
+        const QColor lightPage(QStringLiteral("#f8f9ff"));
+        const QColor lightSlab = MarkdownHighlighter::codeBackgroundFor(lightPage.name(), false);
+        QVERIFY(lightnessOf(lightSlab) < lightnessOf(lightPage));
+
+        // Nothing darker is left on a page that is already black.
+        const QColor blackSlab = MarkdownHighlighter::codeBackgroundFor(
+            QStringLiteral("#000000"), true);
+        QVERIFY(lightnessOf(blackSlab) > 0.0);
+
+        // An unset palette still yields a usable colour.
+        QVERIFY(MarkdownHighlighter::codeBackgroundFor(QString(), true).isValid());
+        QVERIFY(MarkdownHighlighter::codeBackgroundFor(QStringLiteral("nonsense"), false).isValid());
+    }
+
     void lineHeightPerBlockKind() {
         QTemporaryDir directory;
         QVERIFY(directory.isValid());
@@ -234,6 +261,18 @@ private slots:
         QCOMPARE(lineHeight(6), 125.0);  // code
         QCOMPARE(lineHeight(7), 125.0);  // closing fence
 
+        // Every run of fenced lines is reported once, fences included, so QML
+        // can paint one slab behind each. Qt Quick's text node paints character
+        // backgrounds only, which came out ragged where lines are short and
+        // striped through the leading.
+        const QVariantList regions = backend.fencedCodeRegions();
+        QCOMPARE(regions.size(), 1);
+        const QVariantMap region = regions.constFirst().toMap();
+        QCOMPARE(region.value(QStringLiteral("start")).toInt(),
+                 document->findBlockByNumber(5).position());
+        QCOMPARE(region.value(QStringLiteral("end")).toInt(),
+                 document->findBlockByNumber(7).position());
+
         // Opening a fence at the top restates every line under it. The changed
         // range covers one block; the rest come from the highlighter.
         QVERIFY(QMetaObject::invokeMethod(editor.data(), "insert", Q_ARG(int, 0),
@@ -247,6 +286,7 @@ private slots:
         backend.editorTextChanged();
         QCOMPARE(lineHeight(0), 140.0);
         QCOMPARE(lineHeight(2), 120.0);
+        QCOMPARE(backend.fencedCodeRegions().size(), 1);
     }
 
     void keepsWindowStateAcrossRuns() {
@@ -334,9 +374,11 @@ private slots:
         QVERIFY(!formatAt(document, 1, 4).fontItalic());
         QVERIFY(!formatAt(document, 2, 5).fontItalic());
 
-        // The fence covers every line between its markers.
-        QVERIFY(formatAt(document, 1, 0).background().style() != Qt::NoBrush);
-        QVERIFY(formatAt(document, 2, 0).background().style() != Qt::NoBrush);
+        // The fence covers every line between its markers. The slab behind them
+        // is drawn in QML from Backend::fencedCodeRegions, not as a character
+        // background, so what the highlighter leaves here is the monospace.
+        QVERIFY(!formatAt(document, 1, 0).fontFamilies().toStringList().isEmpty());
+        QVERIFY(!formatAt(document, 2, 0).fontFamilies().toStringList().isEmpty());
         QCOMPARE(document.findBlockByNumber(1).userState(),
                  int(MarkdownHighlighter::InFencedCode));
         QCOMPARE(document.findBlockByNumber(3).userState(),

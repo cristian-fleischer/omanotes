@@ -58,6 +58,9 @@ ApplicationWindow {
     // the footer and dialogs keep their proportions whatever you pick here.
     readonly property string bundledFontFamily: "iA Writer Mono S"
     property string editorFontFamily: bundledFontFamily
+    // One entry per run of fenced-code lines: {y, height} in the editor's
+    // coordinates. Recomputed after layout, never during it.
+    property var codeSlabs: []
 
     // Component.onDestruction runs after the window is hidden, when visibility
     // reads Hidden and the size is whatever it last grew to. Both have to be
@@ -165,6 +168,29 @@ ApplicationWindow {
 
     // A maximised or full-screen window reports the screen's size, which is not
     // the size to come back to.
+    // Qt Quick's text node paints character backgrounds only, so a fence drawn
+    // that way comes out ragged where the lines are short and striped through
+    // the leading. Measure each fenced run and paint one rectangle behind it.
+    function updateCodeSlabs() {
+        var regions = backend.fencedCodeRegions();
+        var slabs = [];
+        for (var i = 0; i < regions.length; ++i) {
+            var top = editor.positionToRectangle(regions[i].start);
+            var bottom = editor.positionToRectangle(regions[i].end);
+            slabs.push({ "y": top.y, "height": bottom.y + bottom.height - top.y });
+        }
+        win.codeSlabs = slabs;
+    }
+
+    function scheduleCodeSlabs() {
+        // positionToRectangle is only meaningful once the text has been laid
+        // out, and the change that triggered this has not been laid out yet.
+        Qt.callLater(win.updateCodeSlabs);
+    }
+
+    onEditorFontPixelSizeChanged: scheduleCodeSlabs()
+    onEditorFontFamilyChanged: scheduleCodeSlabs()
+
     function recordWindowedGeometry() {
         if (win.visibility === Window.Windowed)
             win.lastWindowedGeometry = Qt.rect(win.x, win.y, win.width, win.height);
@@ -755,6 +781,26 @@ ApplicationWindow {
                         scrollTo(Math.max(0, cursorTop - margin));
                 }
 
+                Item {
+                    id: codeSlabLayer
+                    x: editor.x
+                    y: editor.y
+                    width: editor.width
+                    height: editor.height
+
+                    Repeater {
+                        model: win.codeSlabs
+                        Rectangle {
+                            x: -win.scaledSize(12)
+                            width: codeSlabLayer.width + win.scaledSize(24)
+                            y: modelData.y
+                            height: modelData.height
+                            radius: win.scaledSize(4)
+                            color: backend.themeCodeBackground
+                        }
+                    }
+                }
+
                 TextEdit {
                     id: editor
                     objectName: "sourceEditor"
@@ -996,7 +1042,11 @@ ApplicationWindow {
                         }
                     }
 
+                    onWidthChanged: win.scheduleCodeSlabs()
+                    onImplicitHeightChanged: win.scheduleCodeSlabs()
+
                     onTextChanged: {
+                        win.scheduleCodeSlabs();
                         if (win.searchUpdating)
                             return;
                         var contentChanged = backend.editorTextChanged();

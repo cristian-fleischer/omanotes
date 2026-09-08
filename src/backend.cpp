@@ -877,9 +877,20 @@ void Backend::scheduleWordCount() {
 
 // Line height is a block property, so it is the one part of the styling the
 // highlighter cannot do: QSyntaxHighlighter only sets character formats.
+bool Backend::isCodeBlock(const QTextBlock &block) const {
+    if (block.userState() == MarkdownHighlighter::InFencedCode)
+        return true;
+    // A closing fence carries the Normal state, so the row itself still has to
+    // be recognised. This runs for every block of the document on every edit,
+    // so rule out the ones that cannot be a fence before reaching for a regex.
+    const QString text = block.text();
+    if (!text.contains(QLatin1Char('`')) && !text.contains(QLatin1Char('~')))
+        return false;
+    return MarkdownHighlighter::isFenceLine(text);
+}
+
 qreal Backend::lineHeightForBlock(const QTextBlock &block) const {
-    if (block.userState() == MarkdownHighlighter::InFencedCode
-            || MarkdownHighlighter::isFenceLine(block.text()))
+    if (isCodeBlock(block))
         return m_codeLineHeight;
     if (MarkdownHighlighter::isTableRow(block.text()))
         return m_tableLineHeight;
@@ -897,6 +908,37 @@ void Backend::applyBlockTypography(QTextCursor &cursor, const QTextBlock &block)
     blockFormat.setLineHeight(lineHeightForBlock(block), QTextBlockFormat::ProportionalHeight);
     cursor.setPosition(block.position());
     cursor.mergeBlockFormat(blockFormat);
+}
+
+QString Backend::themeCodeBackground() const {
+    return MarkdownHighlighter::codeBackgroundFor(m_themeBackground, m_darkMode).name();
+}
+
+QVariantList Backend::fencedCodeRegions() const {
+    QVariantList regions;
+    if (!m_document)
+        return regions;
+
+    QTextBlock first;
+    QTextBlock previous;
+    for (QTextBlock block = m_document->begin(); block.isValid(); block = block.next()) {
+        if (isCodeBlock(block)) {
+            if (!first.isValid())
+                first = block;
+            previous = block;
+            continue;
+        }
+        if (first.isValid()) {
+            regions.append(QVariantMap{{QStringLiteral("start"), first.position()},
+                                       {QStringLiteral("end"), previous.position()}});
+            first = QTextBlock();
+        }
+    }
+    if (first.isValid()) {
+        regions.append(QVariantMap{{QStringLiteral("start"), first.position()},
+                                   {QStringLiteral("end"), previous.position()}});
+    }
+    return regions;
 }
 
 void Backend::applyDocumentTypography() {

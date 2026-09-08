@@ -74,6 +74,27 @@ bool MarkdownHighlighter::isFenceLine(const QString &text) {
     return ::isFenceLine(text);
 }
 
+QColor MarkdownHighlighter::codeBackgroundFor(const QString &pageBackground, bool darkMode) {
+    QColor base(pageBackground);
+    if (!base.isValid()) {
+        base = darkMode ? QColor(QStringLiteral("#101010"))
+                        : QColor(QStringLiteral("#ffffff"));
+    }
+
+    const QColor hsl = base.toHsl();
+    const qreal lightness = hsl.lightnessF();
+    // Darker than the page, which reads as an inset slab. On a page that is
+    // already almost black there is nothing darker left to show, so step up
+    // instead.
+    constexpr qreal step = 0.04;
+    const qreal wanted = lightness > step ? lightness - step : lightness + step;
+
+    // hueF() is -1 for a grey; fromHslF rejects that.
+    const qreal hue = hsl.hueF() < 0 ? 0.0 : hsl.hueF();
+    const qreal saturation = hsl.hueF() < 0 ? 0.0 : hsl.saturationF();
+    return QColor::fromHslF(hue, saturation, qBound(0.0, wanted, 1.0));
+}
+
 QList<int> MarkdownHighlighter::takeRestatedBlocks() {
     const QList<int> blocks = m_restatedBlocks;
     m_restatedBlocks.clear();
@@ -134,8 +155,7 @@ void MarkdownHighlighter::rebuildFormats() {
     const QColor link = !m_customAccent.isEmpty() ? QColor(m_customAccent)
         : (m_darkMode ? QColor(QStringLiteral("#5584aa")) : QColor(QStringLiteral("#2077b2")));
     const QColor quote = marker;
-    const QColor codeBackground = m_darkMode ? QColor(QStringLiteral("#1c1a1a"))
-                                             : QColor(QStringLiteral("#f8f8f8"));
+    const QColor codeBackground = codeBackgroundFor(m_customBackground, m_darkMode);
 
     m_formatFont = document() ? document()->defaultFont() : QFont();
 
@@ -208,12 +228,12 @@ void MarkdownHighlighter::rebuildFormats() {
     m_codeFormat.setForeground(text);
     m_codeFormat.setBackground(codeBackground);
 
-    m_codeBlockFormat = m_codeFormat;
+    m_codeBlockFormat = QTextCharFormat();
+    m_codeBlockFormat.setForeground(text);
     m_codeBlockFormat.setFontFamilies(m_monospaceFamilies);
 
     m_fenceFormat = QTextCharFormat();
     m_fenceFormat.setForeground(marker);
-    m_fenceFormat.setBackground(codeBackground);
     m_fenceFormat.setFontFamilies(m_monospaceFamilies);
 
     m_tableFormat = QTextCharFormat();

@@ -31,6 +31,7 @@ class Backend : public QObject {
     Q_PROPERTY(QString themeForeground READ themeForeground NOTIFY themeColorsChanged)
     Q_PROPERTY(QString themeAccent READ themeAccent NOTIFY themeColorsChanged)
     Q_PROPERTY(QString themeSelection READ themeSelection NOTIFY themeColorsChanged)
+    Q_PROPERTY(QString themeCodeBackground READ themeCodeBackground NOTIFY themeColorsChanged)
 
 public:
     // How the open file separates its lines, and whether it starts with a UTF-8
@@ -59,6 +60,7 @@ public:
     QString themeForeground() const { return m_themeForeground; }
     QString themeAccent() const { return m_themeAccent; }
     QString themeSelection() const { return m_themeSelection; }
+    QString themeCodeBackground() const;
     static int countWords(const QString &text);
     static QString decodeFileContents(const QByteArray &bytes, LineEnding *lineEnding,
                                       bool *hasByteOrderMark);
@@ -91,6 +93,9 @@ public:
     // "iA Writer Mono S Bold". Resolve it to a family the font database
     // knows, or to nothing, which means the bundled font.
     Q_INVOKABLE static QString resolveFontFamily(const QString &family);
+    // First and last document position of every run of fenced-code lines, so
+    // QML can draw one slab behind each of them.
+    Q_INVOKABLE QVariantList fencedCodeRegions() const;
     Q_INVOKABLE QVariantMap viewState() const;
     Q_INVOKABLE void saveViewState(qreal zoom, bool fullWidth,
                                    const QString &fontFamily);
@@ -127,6 +132,7 @@ private:
     void scheduleWordCount();
     void applyDocumentTypography();
     void reapplyTypographyToChange();
+    bool isCodeBlock(const QTextBlock &block) const;
     qreal lineHeightForBlock(const QTextBlock &block) const;
     bool hasWantedLineHeight(const QTextBlock &block) const;
     void applyBlockTypography(QTextCursor &cursor, const QTextBlock &block);
