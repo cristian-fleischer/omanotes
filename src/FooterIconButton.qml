@@ -54,6 +54,19 @@ Item {
                 context.lineTo(4.5, 9.5);
                 context.lineTo(11.5, 9.5);
                 context.lineTo(11.5, 13.5);
+            } else if (control.iconName === "width") {
+                context.moveTo(2.5, 4);
+                context.lineTo(2.5, 12);
+                context.moveTo(13.5, 4);
+                context.lineTo(13.5, 12);
+                context.moveTo(4.5, 8);
+                context.lineTo(11.5, 8);
+                context.moveTo(6.5, 6);
+                context.lineTo(4.5, 8);
+                context.lineTo(6.5, 10);
+                context.moveTo(9.5, 6);
+                context.lineTo(11.5, 8);
+                context.lineTo(9.5, 10);
             } else if (control.iconName === "sidebar") {
                 context.moveTo(2.5, 3.5);
                 context.lineTo(13.5, 3.5);

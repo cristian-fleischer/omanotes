@@ -5,6 +5,7 @@
 #include <QFileSystemWatcher>
 #include <QHash>
 #include <QList>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 #include <QTimer>
@@ -29,6 +30,9 @@ public:
         PathRole,
         ModifiedRole,
         IsCurrentRole,
+        DepthRole,
+        IsDirectoryRole,
+        IsExpandedRole,
     };
     Q_ENUM(Role)
 
@@ -45,7 +49,9 @@ public:
     void setSortMode(const QString &sortMode);
     QString currentPath() const { return m_currentPath; }
     void setCurrentPath(const QString &currentPath);
-    int count() const { return int(m_filtered.size()); }
+    // Notes on screen, which is what the footer counts. Folder rows are
+    // structure, not content, so they are not part of it.
+    int count() const { return m_visibleNotes; }
     int totalCount() const { return int(m_entries.size()); }
     bool truncated() const { return m_truncated; }
 
@@ -58,6 +64,10 @@ public:
     Q_INVOKABLE QString pathAt(int row) const;
     Q_INVOKABLE int rowForPath(const QString &path) const;
     Q_INVOKABLE QString createNote();
+    Q_INVOKABLE bool isDirectoryAt(int row) const;
+    Q_INVOKABLE void toggleExpanded(int row);
+    Q_INVOKABLE void setExpanded(int row, bool expanded);
+    Q_INVOKABLE int rowForParentOf(int row) const;
     // QML has no QUrl::fromLocalFile, and string-splicing a file:// URL
     // loses every path that contains a space or a percent sign.
     Q_INVOKABLE QUrl urlForPath(const QString &path) const;
@@ -77,6 +87,7 @@ signals:
     void countChanged();
 
 private:
+    // One Markdown file found by the scan.
     struct Entry {
         QString title;
         QString relativeDir;
@@ -85,8 +96,25 @@ private:
         QDateTime modified;
     };
 
+    // One visible row: a folder or a note, at a depth in the tree.
+    struct Node {
+        QString title;
+        QString relativeDir;
+        QString relativePath;
+        QString path;
+        QDateTime modified;
+        int depth = 0;
+        bool directory = false;
+    };
+
     void scan();
-    void applyFilter();
+    void rebuildRows();
+    void appendDirectory(const QString &relativeDir, int depth,
+                         const QHash<QString, QList<int>> &files,
+                         const QHash<QString, QStringList> &subdirectories);
+    void resetRows();
+    bool expandAncestorsOf(const QString &relativeDir);
+    void saveCollapsedFolders();
     void rewatch();
 
     QString m_root;
@@ -94,8 +122,11 @@ private:
     QString m_sortMode = QStringLiteral("name");
     QString m_currentPath;
     bool m_truncated = false;
+    int m_visibleNotes = 0;
+    QString m_canonicalRoot;
     QList<Entry> m_entries;
-    QList<int> m_filtered;
+    QList<Node> m_rows;
+    QSet<QString> m_collapsedFolders;
     QStringList m_scannedDirectories;
     QFileSystemWatcher m_watcher;
     QTimer m_rescanTimer;

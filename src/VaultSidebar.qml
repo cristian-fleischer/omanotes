@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Window
 
 // The vault list: a filter field, every note under the root, and a footer that
 // creates notes and changes the root. Opening always goes through
@@ -15,12 +16,17 @@ Rectangle {
     property color textColor: "#eeeeee"
     property color mutedColor: "#909191"
     property color accentColor: "#5584aa"
+    // The open buffer has changes that are not on disk yet.
+    property bool documentModified: false
+    // Those changes belong to no file at all.
+    property bool hasUntitledDraft: false
 
     readonly property int minimumWidth: 180
     readonly property int maximumWidth: 420
     property int panelWidth: 260
 
     signal noteActivated(url fileUrl)
+    signal draftActivated()
     signal newNoteRequested()
     signal rootChangeRequested()
     signal dismissed()
@@ -48,8 +54,36 @@ Rectangle {
     function activate(row) {
         if (!sidebar.vaultModel || row < 0 || row >= list.count)
             return;
+        if (sidebar.vaultModel.isDirectoryAt(row)) {
+            sidebar.vaultModel.toggleExpanded(row);
+            // Expanding only adds rows below the folder, so its own index holds.
+            list.currentIndex = row;
+            return;
+        }
         list.currentIndex = row;
         sidebar.noteActivated(sidebar.vaultModel.urlAt(row));
+    }
+
+    // Left closes the folder the selection is in, right opens the one it is on.
+    // Both are no-ops while a filter is up, where the tree is flattened away.
+    function expandSelection(expanded) {
+        if (!sidebar.vaultModel || filterField.text.length > 0)
+            return false;
+        var row = list.currentIndex;
+        if (row < 0)
+            return false;
+        if (!sidebar.vaultModel.isDirectoryAt(row)) {
+            if (expanded)
+                return false;
+            row = sidebar.vaultModel.rowForParentOf(row);
+            if (row < 0)
+                return false;
+            list.currentIndex = row;
+            return true;
+        }
+        sidebar.vaultModel.setExpanded(row, expanded);
+        list.currentIndex = row;
+        return true;
     }
 
     function activateSelection() {
@@ -84,18 +118,22 @@ Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: sidebar.scaledSize(44)
 
-            TextField {
+            // A plain TextInput, not a TextField: Material floats its
+            // placeholder into a label above the field, which has nowhere to go
+            // in a strip this thin.
+            TextInput {
                 id: filterField
                 objectName: "vaultFilter"
                 anchors.fill: parent
-                anchors.leftMargin: sidebar.scaledSize(8)
-                anchors.rightMargin: sidebar.scaledSize(8)
-                placeholderText: "Filter notes"
+                anchors.leftMargin: sidebar.scaledSize(10)
+                anchors.rightMargin: sidebar.scaledSize(10)
+                verticalAlignment: TextInput.AlignVCenter
+                clip: true
                 color: sidebar.textColor
-                placeholderTextColor: sidebar.mutedColor
+                selectionColor: sidebar.accentColor
+                selectedTextColor: sidebar.textColor
                 font.pixelSize: sidebar.scaledSize(13)
                 selectByMouse: true
-                background: Item {}
 
                 onTextChanged: {
                     if (sidebar.vaultModel)
@@ -106,6 +144,12 @@ Rectangle {
                 // filtering and choosing are one uninterrupted gesture.
                 Keys.onDownPressed: sidebar.moveSelection(1)
                 Keys.onUpPressed: sidebar.moveSelection(-1)
+                Keys.onLeftPressed: function(event) {
+                    event.accepted = sidebar.expandSelection(false);
+                }
+                Keys.onRightPressed: function(event) {
+                    event.accepted = sidebar.expandSelection(true);
+                }
                 Keys.onReturnPressed: sidebar.activateSelection()
                 Keys.onEnterPressed: sidebar.activateSelection()
                 Keys.onEscapePressed: function(event) {
@@ -115,6 +159,15 @@ Rectangle {
                         sidebar.dismissed();
                     event.accepted = true;
                 }
+            }
+
+            Label {
+                anchors.left: filterField.left
+                anchors.verticalCenter: filterField.verticalCenter
+                text: "Filter notes"
+                visible: filterField.text.length === 0
+                color: sidebar.mutedColor
+                font.pixelSize: sidebar.scaledSize(13)
             }
         }
 
@@ -133,14 +186,60 @@ Rectangle {
             clip: true
             currentIndex: -1
             model: sidebar.vaultModel
+
+            // A draft with no file behind it has no row in the vault, so it
+            // gets one of its own at the top of the list.
+            header: Item {
+                width: list.width
+                height: sidebar.hasUntitledDraft ? sidebar.scaledSize(30) : 0
+                visible: sidebar.hasUntitledDraft
+
+                Rectangle {
+                    anchors.fill: parent
+                    color: Qt.rgba(sidebar.accentColor.r, sidebar.accentColor.g,
+                                   sidebar.accentColor.b, sidebar.darkMode ? 0.30 : 0.20)
+                }
+
+                Text {
+                    x: sidebar.scaledSize(10)
+                    width: parent.width - x - sidebar.scaledSize(24)
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "Untitled draft"
+                    color: sidebar.textColor
+                    elide: Text.ElideRight
+                    font.pixelSize: sidebar.scaledSize(13)
+                }
+
+                Rectangle {
+                    anchors.right: parent.right
+                    anchors.rightMargin: sidebar.scaledSize(10)
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: sidebar.scaledSize(6)
+                    height: width
+                    radius: width / 2
+                    color: sidebar.accentColor
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: sidebar.draftActivated()
+                }
+            }
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
             delegate: ItemDelegate {
                 id: entry
                 width: list.width
-                height: relativeDir.length > 0 ? sidebar.scaledSize(46)
-                                               : sidebar.scaledSize(32)
+                // The parent path is only worth a second line while filtering,
+                // where the tree is flattened and nesting no longer shows it.
+                readonly property bool showsParent:
+                    !isDirectory && relativeDir.length > 0
+                    && sidebar.vaultModel !== null && sidebar.vaultModel.filter.length > 0
+                readonly property real indent:
+                    sidebar.scaledSize(10 + depth * 13)
+                height: showsParent ? sidebar.scaledSize(44) : sidebar.scaledSize(30)
                 padding: 0
                 onClicked: sidebar.activate(index)
 
@@ -157,27 +256,80 @@ Rectangle {
                                 : "transparent"
                 }
 
-                contentItem: Column {
-                    anchors.verticalCenter: parent.verticalCenter
-                    leftPadding: sidebar.scaledSize(12)
-                    rightPadding: sidebar.scaledSize(10)
-                    spacing: 1
+                contentItem: Item {
+                    anchors.fill: parent
 
-                    Label {
-                        width: entry.width - sidebar.scaledSize(22)
-                        text: title
-                        color: sidebar.textColor
-                        elide: Text.ElideRight
-                        font.pixelSize: sidebar.scaledSize(13)
+                    // Drawn rather than typed: iA Writer Mono S has no
+                    // geometric-shape glyphs, and a fallback font puts a dot
+                    // where the triangle should be.
+                    Canvas {
+                        id: disclosure
+                        x: entry.indent
+                        anchors.verticalCenter: parent.verticalCenter
+                        visible: isDirectory
+                        width: sidebar.scaledSize(9)
+                        height: sidebar.scaledSize(9)
+
+                        readonly property real dpr: Screen.devicePixelRatio
+                        readonly property bool open: isDirectory && isExpanded
+                        onOpenChanged: requestPaint()
+                        onDprChanged: requestPaint()
+
+                        onPaint: {
+                            var context = getContext("2d");
+                            context.reset();
+                            context.fillStyle = sidebar.mutedColor;
+                            var size = width;
+                            context.beginPath();
+                            if (open) {
+                                context.moveTo(size * 0.1, size * 0.3);
+                                context.lineTo(size * 0.9, size * 0.3);
+                                context.lineTo(size * 0.5, size * 0.78);
+                            } else {
+                                context.moveTo(size * 0.3, size * 0.1);
+                                context.lineTo(size * 0.78, size * 0.5);
+                                context.lineTo(size * 0.3, size * 0.9);
+                            }
+                            context.closePath();
+                            context.fill();
+                        }
                     }
 
-                    Label {
-                        width: entry.width - sidebar.scaledSize(22)
-                        text: relativeDir
-                        visible: relativeDir.length > 0
-                        color: sidebar.mutedColor
-                        elide: Text.ElideLeft
-                        font.pixelSize: sidebar.scaledSize(10)
+                    // A filled dot, the way an editor tab marks a dirty buffer.
+                    Rectangle {
+                        id: unsavedMark
+                        anchors.right: parent.right
+                        anchors.rightMargin: sidebar.scaledSize(10)
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: sidebar.scaledSize(6)
+                        height: width
+                        radius: width / 2
+                        color: sidebar.accentColor
+                        visible: isCurrent && sidebar.documentModified
+                    }
+
+                    Column {
+                        x: entry.indent + (isDirectory ? sidebar.scaledSize(13) : 0)
+                        width: entry.width - x - sidebar.scaledSize(24)
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: 1
+
+                        Text {
+                            width: parent.width
+                            text: title
+                            color: isDirectory ? sidebar.mutedColor : sidebar.textColor
+                            elide: Text.ElideRight
+                            font.pixelSize: sidebar.scaledSize(13)
+                        }
+
+                        Text {
+                            width: parent.width
+                            text: relativeDir
+                            visible: entry.showsParent
+                            color: sidebar.mutedColor
+                            elide: Text.ElideLeft
+                            font.pixelSize: sidebar.scaledSize(10)
+                        }
                     }
                 }
             }

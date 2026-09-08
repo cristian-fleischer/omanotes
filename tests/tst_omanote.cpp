@@ -26,6 +26,111 @@ private slots:
                            m_settingsDirectory.path());
     }
 
+    // Closing the window is not a decision about the text: what was typed comes
+    // back in the next window, the way Sublime Text's hot exit works.
+    void keepsUnsavedDraftAcrossRestart() {
+        clearRecoverySnapshots();
+
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("draft.md"));
+        QFile seed(path);
+        QVERIFY(seed.open(QIODevice::WriteOnly));
+        QCOMPARE(seed.write("original\n"), qint64(9));
+        seed.close();
+        const QUrl fileUrl = QUrl::fromLocalFile(path);
+
+        {
+            QQmlEngine engine;
+            QScopedPointer<QObject> editor(createEditor(&engine));
+            QVERIFY(editor);
+            Backend backend;
+            backend.attachDocument(editor->property("textDocument").value<QObject *>());
+            backend.open(fileUrl);
+
+            QVERIFY(QMetaObject::invokeMethod(editor.data(), "insert", Q_ARG(int, 0),
+                                              Q_ARG(QString, QStringLiteral("draft "))));
+            backend.editorTextChanged();
+            QVERIFY(backend.modified());
+            backend.persistDraft();
+        }
+
+        // The file on disk is exactly as it was left.
+        QFile onDisk(path);
+        QVERIFY(onDisk.open(QIODevice::ReadOnly));
+        QCOMPARE(onDisk.readAll(), QByteArray("original\n"));
+        onDisk.close();
+
+        {
+            QQmlEngine engine;
+            QScopedPointer<QObject> editor(createEditor(&engine));
+            QVERIFY(editor);
+            Backend backend;
+            backend.attachDocument(editor->property("textDocument").value<QObject *>());
+
+            QCOMPARE(editor->property("text").toString(),
+                     QStringLiteral("draft original\n"));
+            QVERIFY(backend.modified());
+            QCOMPARE(backend.fileUrl(), fileUrl);
+            backend.discardRecovery();
+        }
+
+        clearRecoverySnapshots();
+    }
+
+    void zoomsAndWidensTheEditor() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        VaultModel vault;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        engine.rootContext()->setContextProperty(QStringLiteral("vault"), &vault);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+        QVERIFY(window->findChild<QObject *>(QStringLiteral("widthButton")));
+        QCOMPARE(window->property("editorFontPixelSize").toInt(), 20);
+
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "setZoom",
+                                          Q_ARG(QVariant, QVariant(1.5))));
+        QCOMPARE(window->property("editorFontPixelSize").toInt(), 30);
+        QCOMPARE(editor->property("font").value<QFont>().pixelSize(), 30);
+
+        // Clamped at both ends, so a stuck key cannot make the text unusable.
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "setZoom",
+                                          Q_ARG(QVariant, QVariant(9.0))));
+        QCOMPARE(window->property("editorZoom").toDouble(), 2.5);
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "setZoom",
+                                          Q_ARG(QVariant, QVariant(0.0))));
+        QCOMPARE(window->property("editorZoom").toDouble(), 0.6);
+
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "setZoom",
+                                          Q_ARG(QVariant, QVariant(1.0))));
+        QCOMPARE(window->property("editorFontPixelSize").toInt(), 20);
+
+        // The column is a measured 65 characters until it is switched off.
+        QVERIFY(window->property("editorWidth").toInt()
+                < window->property("editorAreaWidth").toInt());
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "toggleFullWidth"));
+        QCOMPARE(window->property("fullWidth").toBool(), true);
+        QCOMPARE(window->property("editorWidth").toInt(),
+                 window->property("editorAreaWidth").toInt());
+
+        // Both settings outlive the window.
+        QVariantMap view = backend.viewState();
+        QCOMPARE(view.value(QStringLiteral("zoom")).toDouble(), 1.0);
+        QCOMPARE(view.value(QStringLiteral("fullWidth")).toBool(), true);
+
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "toggleFullWidth"));
+        backend.saveViewState(1.0, false);
+    }
+
     void headingFormats() {
         QTextDocument document;
         document.setDefaultFont(bodyFont());
@@ -192,16 +297,19 @@ private slots:
         VaultModel model;
         model.setRoot(vault.path());
 
+        // Four notes, laid out as a folder tree: folders before the notes that
+        // sit beside them, each level in name order.
         QCOMPARE(model.count(), 4);
+        QCOMPARE(model.rowCount(), 6);
         QVERIFY(!model.truncated());
         QCOMPARE(titlesOf(model),
-                 (QStringList{QStringLiteral("Alpha"), QStringLiteral("Beta"),
-                              QStringLiteral("Gamma"), QStringLiteral("zeta")}));
-
-        // Nesting shows as dim secondary text; a top-level note has none.
-        QCOMPARE(roleOf(model, 0, VaultModel::RelativeDirRole).toString(), QString());
-        QCOMPARE(roleOf(model, 1, VaultModel::RelativeDirRole).toString(),
-                 QStringLiteral("projects"));
+                 (QStringList{QStringLiteral("projects"), QStringLiteral("deep"),
+                              QStringLiteral("Gamma"), QStringLiteral("Beta"),
+                              QStringLiteral("Alpha"), QStringLiteral("zeta")}));
+        QCOMPARE(depthsOf(model), (QList<int>{0, 1, 2, 1, 0, 0}));
+        QVERIFY(roleOf(model, 0, VaultModel::IsDirectoryRole).toBool());
+        QVERIFY(roleOf(model, 1, VaultModel::IsDirectoryRole).toBool());
+        QVERIFY(!roleOf(model, 2, VaultModel::IsDirectoryRole).toBool());
         QCOMPARE(roleOf(model, 2, VaultModel::RelativeDirRole).toString(),
                  QStringLiteral("projects/deep"));
 
@@ -214,17 +322,58 @@ private slots:
         model.refresh();
         QCOMPARE(model.count(), 4);
 
-        // The current file is the one the editor has open.
-        model.setCurrentPath(roleOf(model, 1, VaultModel::PathRole).toString());
+        // The current file is the one the editor has open. A folder never is.
+        model.setCurrentPath(roleOf(model, 3, VaultModel::PathRole).toString());
         QCOMPARE(roleOf(model, 0, VaultModel::IsCurrentRole).toBool(), false);
-        QCOMPARE(roleOf(model, 1, VaultModel::IsCurrentRole).toBool(), true);
-        QCOMPARE(model.rowForPath(model.pathAt(1)), 1);
+        QCOMPARE(roleOf(model, 3, VaultModel::IsCurrentRole).toBool(), true);
+        QCOMPARE(model.rowForPath(model.pathAt(3)), 3);
 
         const QString created = model.createNote();
         QVERIFY(!created.isEmpty());
         QCOMPARE(QFileInfo(created).fileName(), QStringLiteral("untitled.md"));
         QCOMPARE(QFileInfo(model.createNote()).fileName(), QStringLiteral("untitled-2.md"));
         QCOMPARE(model.count(), 6);
+    }
+
+    void vaultModelCollapsesFolders() {
+        QTemporaryDir vault;
+        QVERIFY(vault.isValid());
+        QVERIFY(writeNote(vault.path(), QStringLiteral("Root.md")));
+        QVERIFY(writeNote(vault.path(), QStringLiteral("projects/Beta.md")));
+        QVERIFY(writeNote(vault.path(), QStringLiteral("projects/deep/Gamma.md")));
+
+        VaultModel model;
+        model.setRoot(vault.path());
+        QCOMPARE(model.rowCount(), 5);
+        QVERIFY(roleOf(model, 0, VaultModel::IsExpandedRole).toBool());
+
+        // Collapsing takes the whole subtree with it, notes and folders alike.
+        model.toggleExpanded(0);
+        QCOMPARE(model.rowCount(), 2);
+        QCOMPARE(model.count(), 1);
+        QVERIFY(!roleOf(model, 0, VaultModel::IsExpandedRole).toBool());
+        QCOMPARE(titlesOf(model),
+                 (QStringList{QStringLiteral("projects"), QStringLiteral("Root")}));
+
+        // A note is not a folder, so neither call does anything to it.
+        model.toggleExpanded(1);
+        QCOMPARE(model.rowCount(), 2);
+
+        // Opening a note inside a collapsed folder opens the way down to it.
+        const QString buried = QDir(vault.path())
+            .filePath(QStringLiteral("projects/deep/Gamma.md"));
+        model.setCurrentPath(buried);
+        QCOMPARE(model.rowCount(), 5);
+        QCOMPARE(model.rowForPath(QFileInfo(buried).canonicalFilePath()), 2);
+        QVERIFY(roleOf(model, 2, VaultModel::IsCurrentRole).toBool());
+
+        // A filter flattens the tree, folders and all.
+        model.setFilter(QStringLiteral("mm"));
+        QCOMPARE(model.rowCount(), 1);
+        QCOMPARE(roleOf(model, 0, VaultModel::TitleRole).toString(),
+                 QStringLiteral("Gamma"));
+        QCOMPARE(roleOf(model, 0, VaultModel::DepthRole).toInt(), 0);
+        QVERIFY(!roleOf(model, 0, VaultModel::IsDirectoryRole).toBool());
     }
 
     void vaultModelHonoursTheFileCap() {
@@ -316,7 +465,8 @@ private slots:
         QVERIFY(sidebar);
         QVERIFY(list);
         QVERIFY(filterField);
-        QCOMPARE(list->property("count").toInt(), 3);
+        QCOMPARE(vault.rowCount(), 4);
+        QCOMPARE(list->property("count").toInt(), 4);
 
         // The filter field drives the model. QML keeps no second copy of the list.
         filterField->setProperty("text", QStringLiteral("fusion"));
@@ -331,7 +481,7 @@ private slots:
         QCOMPARE(vault.currentPath(), backend.fileUrl().toLocalFile());
 
         filterField->setProperty("text", QString());
-        QCOMPARE(list->property("count").toInt(), 3);
+        QCOMPARE(list->property("count").toInt(), 4);
 
         // Closed until asked for, from the footer icon or Ctrl+L.
         QCOMPARE(window->property("sidebarVisible").toBool(), false);
@@ -344,7 +494,23 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(window.data(), "createNote"));
         QCOMPARE(QFileInfo(backend.fileUrl().toLocalFile()).fileName(),
                  QStringLiteral("untitled.md"));
-        QCOMPARE(list->property("count").toInt(), 4);
+        QCOMPARE(list->property("count").toInt(), 5);
+
+        // An edited buffer is marked in the list, and a draft with no file
+        // behind it gets a row of its own.
+        QObject *sidebarItem = window->findChild<QObject *>(QStringLiteral("vaultSidebar"));
+        QVERIFY(sidebarItem);
+        QCOMPARE(sidebarItem->property("documentModified").toBool(), false);
+        QCOMPARE(sidebarItem->property("hasUntitledDraft").toBool(), false);
+        QVERIFY(!backend.untitled());
+
+        QObject *editorItem = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editorItem);
+        QVERIFY(QMetaObject::invokeMethod(editorItem, "insert", Q_ARG(int, 0),
+                                          Q_ARG(QString, QStringLiteral("edit "))));
+        QVERIFY(backend.modified());
+        QCOMPARE(sidebarItem->property("documentModified").toBool(), true);
+        QCOMPARE(sidebarItem->property("hasUntitledDraft").toBool(), false);
 
         // Sidebar width and visibility outlive the window.
         backend.saveSidebarState(false, 320);
@@ -730,6 +896,17 @@ private:
         (void)document.size();
     }
 
+    // Recovery slots are shared by every Backend in the process, so a test that
+    // cares which snapshot is restored has to start from an empty set.
+    static void clearRecoverySnapshots() {
+        const QString stateDirectory =
+            QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+        const QFileInfoList leftovers = QDir(stateDirectory).entryInfoList(
+            QStringList{QStringLiteral("recovery-*")}, QDir::Files);
+        for (const QFileInfo &leftover : leftovers)
+            QFile::remove(leftover.absoluteFilePath());
+    }
+
     static QFont bodyFont() {
         QFont font(QStringLiteral("monospace"));
         font.setPointSizeF(12.0);
@@ -771,9 +948,16 @@ private:
 
     static QStringList titlesOf(const VaultModel &model) {
         QStringList titles;
-        for (int row = 0; row < model.count(); ++row)
+        for (int row = 0; row < model.rowCount(); ++row)
             titles.append(roleOf(model, row, VaultModel::TitleRole).toString());
         return titles;
+    }
+
+    static QList<int> depthsOf(const VaultModel &model) {
+        QList<int> depths;
+        for (int row = 0; row < model.rowCount(); ++row)
+            depths.append(roleOf(model, row, VaultModel::DepthRole).toInt());
+        return depths;
     }
 
     static QString corpusDirectory() {

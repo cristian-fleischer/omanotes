@@ -20,6 +20,7 @@ class Backend : public QObject {
     Q_PROPERTY(QUrl fileUrl READ fileUrl NOTIFY fileUrlChanged)
     Q_PROPERTY(QString fileName READ fileName NOTIFY fileUrlChanged)
     Q_PROPERTY(bool modified READ modified NOTIFY modifiedChanged)
+    Q_PROPERTY(bool untitled READ untitled NOTIFY fileUrlChanged)
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
     Q_PROPERTY(int wordCount READ wordCount NOTIFY wordCountChanged)
     Q_PROPERTY(bool darkMode READ darkMode WRITE setDarkMode NOTIFY darkModeChanged)
@@ -44,6 +45,8 @@ public:
     QString fileName() const;
 
     bool modified() const { return m_modified; }
+    // No file behind the buffer yet: a jotting, not a note.
+    bool untitled() const { return !m_fileUrl.isValid() || m_fileUrl.isEmpty(); }
     QString status() const { return m_status; }
     int wordCount() const { return m_wordCount; }
     bool darkMode() const { return m_darkMode; }
@@ -70,6 +73,7 @@ public:
     Q_INVOKABLE void saveAsDialog();
     Q_INVOKABLE void saveAs(const QUrl &url);
     Q_INVOKABLE void fileDialogCanceled();
+    Q_INVOKABLE void persistDraft();
     Q_INVOKABLE void discardRecovery();
     Q_INVOKABLE void reloadFromDisk();
     Q_INVOKABLE void keepExternalVersion();
@@ -81,6 +85,8 @@ public:
     Q_INVOKABLE QVariantList hiddenRangesAt(int position) const;
     Q_INVOKABLE void setSearchHighlight(const QString &query, int currentMatchStart);
     Q_INVOKABLE void openExternalUrl(const QUrl &url);
+    Q_INVOKABLE QVariantMap viewState() const;
+    Q_INVOKABLE void saveViewState(qreal zoom, bool fullWidth);
     Q_INVOKABLE QVariantMap sidebarState() const;
     Q_INVOKABLE void saveSidebarState(bool visible, int width);
     Q_INVOKABLE QVariantMap windowGeometry() const;

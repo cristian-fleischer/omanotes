@@ -255,6 +255,14 @@ void Backend::fileDialogCanceled() {
     m_closeAfterSave = false;
 }
 
+// Closing the window is not a decision about the text. Whatever is unsaved goes
+// to the snapshot now, rather than on the next tick of the timer, and comes back
+// in the window that opens next.
+void Backend::persistDraft() {
+    m_recoveryTimer.stop();
+    writeRecovery();
+}
+
 void Backend::discardRecovery() {
     clearRecovery();
 }
@@ -405,6 +413,19 @@ void Backend::openExternalUrl(const QUrl &url) {
     if (scheme == QStringLiteral("http") || scheme == QStringLiteral("https")
             || scheme == QStringLiteral("mailto"))
         QDesktopServices::openUrl(url);
+}
+
+QVariantMap Backend::viewState() const {
+    QSettings settings;
+    return {{QStringLiteral("zoom"), settings.value(QStringLiteral("view/zoom"), 1.0)},
+            {QStringLiteral("fullWidth"),
+             settings.value(QStringLiteral("view/fullWidth"), false)}};
+}
+
+void Backend::saveViewState(qreal zoom, bool fullWidth) {
+    QSettings settings;
+    settings.setValue(QStringLiteral("view/zoom"), zoom);
+    settings.setValue(QStringLiteral("view/fullWidth"), fullWidth);
 }
 
 QVariantMap Backend::sidebarState() const {
@@ -583,7 +604,7 @@ void Backend::restoreRecovery() {
     }
     setFileUrl(recoveredUrl);
     setModified(true);
-    setStatus(QStringLiteral("Recovered unsaved changes"));
+    setStatus(QStringLiteral("Unsaved draft restored"));
 }
 
 void Backend::clearRecovery() {

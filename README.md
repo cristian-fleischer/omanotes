@@ -41,8 +41,14 @@ the sidebar footer; the default is `$HOME/Notes`.
 - `Ctrl+B`, `Ctrl+I`, and `Ctrl+K` insert bold, italic, and link Markdown.
 - `Ctrl+?` shows the keyboard shortcut reference.
 
-Unsaved drafts are recovered after an abnormal exit. OmaNote also watches open
-files and warns before an external change can replace local work.
+Closing the window never loses an unsaved draft and never asks about it. What
+you typed is written to a snapshot and comes back the next time the app opens,
+with the file on disk untouched, the way Sublime Text's hot exit works. The same
+snapshot covers a crash. Switching to another note still asks, since that buffer
+is about to be replaced.
+
+OmaNote watches the open file and warns before an external change can replace
+local work.
 
 Text follows the desktop text size — `omarchy display text size`, or GNOME's
 `text-scaling-factor` — and re-flows without a restart. The default of 12px leaves

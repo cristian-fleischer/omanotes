@@ -15,6 +15,7 @@ namespace {
 
 const QString rootSetting = QStringLiteral("vault/root");
 const QString sortModeSetting = QStringLiteral("vault/sortMode");
+const QString collapsedFoldersSetting = QStringLiteral("vault/collapsedFolders");
 
 bool isMarkdown(const QString &fileName) {
     return fileName.endsWith(QStringLiteral(".md"), Qt::CaseInsensitive)
@@ -44,8 +45,16 @@ QString VaultModel::defaultRoot() {
 
 void VaultModel::loadSettings() {
     QSettings settings;
+    const QStringList collapsed = settings.value(collapsedFoldersSetting).toStringList();
+    m_collapsedFolders = QSet<QString>(collapsed.begin(), collapsed.end());
     setSortMode(settings.value(sortModeSetting, QStringLiteral("name")).toString());
     setRoot(settings.value(rootSetting, defaultRoot()).toString());
+}
+
+void VaultModel::saveCollapsedFolders() {
+    QStringList folders(m_collapsedFolders.begin(), m_collapsedFolders.end());
+    folders.sort();
+    QSettings().setValue(collapsedFoldersSetting, folders);
 }
 
 void VaultModel::setRoot(const QString &root) {
@@ -65,10 +74,7 @@ void VaultModel::setFilter(const QString &filter) {
 
     m_filter = filter;
     emit filterChanged();
-    beginResetModel();
-    applyFilter();
-    endResetModel();
-    emit countChanged();
+    resetRows();
 }
 
 void VaultModel::setSortMode(const QString &sortMode) {
@@ -97,32 +103,63 @@ void VaultModel::setCurrentPath(const QString &currentPath) {
 
     m_currentPath = cleaned;
     emit currentPathChanged();
-    if (!m_filtered.isEmpty()) {
-        emit dataChanged(index(0), index(int(m_filtered.size()) - 1),
-                         QList<int>{IsCurrentRole});
+
+    // A note inside a collapsed folder cannot be highlighted, so open the way
+    // down to it before saying anything changed.
+    if (!m_canonicalRoot.isEmpty() && cleaned.startsWith(m_canonicalRoot + QLatin1Char('/'))
+            && expandAncestorsOf(QFileInfo(QDir(m_canonicalRoot)
+                                               .relativeFilePath(cleaned)).path())) {
+        resetRows();
+        return;
     }
+
+    if (!m_rows.isEmpty())
+        emit dataChanged(index(0), index(int(m_rows.size()) - 1), QList<int>{IsCurrentRole});
+}
+
+bool VaultModel::expandAncestorsOf(const QString &relativeDir) {
+    if (relativeDir.isEmpty() || relativeDir == QStringLiteral("."))
+        return false;
+
+    bool changed = false;
+    QString path = relativeDir;
+    while (!path.isEmpty() && path != QStringLiteral(".")) {
+        if (m_collapsedFolders.remove(path))
+            changed = true;
+        const int slash = path.lastIndexOf(QLatin1Char('/'));
+        path = slash < 0 ? QString() : path.left(slash);
+    }
+    if (changed)
+        saveCollapsedFolders();
+    return changed;
 }
 
 int VaultModel::rowCount(const QModelIndex &parent) const {
-    return parent.isValid() ? 0 : int(m_filtered.size());
+    return parent.isValid() ? 0 : int(m_rows.size());
 }
 
 QVariant VaultModel::data(const QModelIndex &index, int role) const {
-    if (!index.isValid() || index.row() < 0 || index.row() >= m_filtered.size())
+    if (!index.isValid() || index.row() < 0 || index.row() >= m_rows.size())
         return {};
 
-    const Entry &entry = m_entries.at(m_filtered.at(index.row()));
+    const Node &node = m_rows.at(index.row());
     switch (role) {
     case TitleRole:
-        return entry.title;
+        return node.title;
     case RelativeDirRole:
-        return entry.relativeDir;
+        return node.relativeDir;
     case PathRole:
-        return entry.path;
+        return node.path;
     case ModifiedRole:
-        return entry.modified;
+        return node.modified;
     case IsCurrentRole:
-        return !m_currentPath.isEmpty() && entry.path == m_currentPath;
+        return !node.directory && !m_currentPath.isEmpty() && node.path == m_currentPath;
+    case DepthRole:
+        return node.depth;
+    case IsDirectoryRole:
+        return node.directory;
+    case IsExpandedRole:
+        return node.directory && !m_collapsedFolders.contains(node.relativePath);
     default:
         return {};
     }
@@ -133,10 +170,15 @@ QHash<int, QByteArray> VaultModel::roleNames() const {
             {RelativeDirRole, "relativeDir"},
             {PathRole, "path"},
             {ModifiedRole, "modified"},
-            {IsCurrentRole, "isCurrent"}};
+            {IsCurrentRole, "isCurrent"},
+            {DepthRole, "depth"},
+            {IsDirectoryRole, "isDirectory"},
+            {IsExpandedRole, "isExpanded"}};
 }
 
 QUrl VaultModel::urlAt(int row) const {
+    if (isDirectoryAt(row))
+        return {};
     const QString path = pathAt(row);
     return path.isEmpty() ? QUrl() : QUrl::fromLocalFile(path);
 }
@@ -155,17 +197,58 @@ void VaultModel::setCurrentUrl(const QUrl &url) {
 }
 
 QString VaultModel::pathAt(int row) const {
-    if (row < 0 || row >= m_filtered.size())
+    if (row < 0 || row >= m_rows.size())
         return {};
-    return m_entries.at(m_filtered.at(row)).path;
+    return m_rows.at(row).path;
+}
+
+bool VaultModel::isDirectoryAt(int row) const {
+    return row >= 0 && row < m_rows.size() && m_rows.at(row).directory;
+}
+
+// The folder row this row sits under, so Left can walk out of a subtree.
+int VaultModel::rowForParentOf(int row) const {
+    if (row < 0 || row >= m_rows.size())
+        return -1;
+    const QString parent = m_rows.at(row).relativeDir;
+    if (parent.isEmpty())
+        return -1;
+    for (int candidate = row - 1; candidate >= 0; --candidate) {
+        if (m_rows.at(candidate).directory && m_rows.at(candidate).relativePath == parent)
+            return candidate;
+    }
+    return -1;
+}
+
+void VaultModel::toggleExpanded(int row) {
+    if (!isDirectoryAt(row))
+        return;
+    setExpanded(row, m_collapsedFolders.contains(m_rows.at(row).relativePath));
+}
+
+void VaultModel::setExpanded(int row, bool expanded) {
+    if (!isDirectoryAt(row))
+        return;
+
+    const QString folder = m_rows.at(row).relativePath;
+    if (expanded == !m_collapsedFolders.contains(folder))
+        return;
+
+    if (expanded)
+        m_collapsedFolders.remove(folder);
+    else
+        m_collapsedFolders.insert(folder);
+
+    saveCollapsedFolders();
+    resetRows();
 }
 
 int VaultModel::rowForPath(const QString &path) const {
     if (path.isEmpty())
         return -1;
     const QString cleaned = QDir::cleanPath(path);
-    for (qsizetype row = 0; row < m_filtered.size(); ++row) {
-        if (m_entries.at(m_filtered.at(row)).path == cleaned)
+    for (qsizetype row = 0; row < m_rows.size(); ++row) {
+        if (!m_rows.at(row).directory && m_rows.at(row).path == cleaned)
             return int(row);
     }
     return -1;
@@ -175,15 +258,23 @@ void VaultModel::refresh() {
     m_rescanTimer.stop();
     beginResetModel();
     scan();
-    applyFilter();
+    rebuildRows();
     endResetModel();
     rewatch();
+    emit countChanged();
+}
+
+void VaultModel::resetRows() {
+    beginResetModel();
+    rebuildRows();
+    endResetModel();
     emit countChanged();
 }
 
 void VaultModel::scan() {
     m_entries.clear();
     m_scannedDirectories.clear();
+    m_canonicalRoot.clear();
     m_truncated = false;
 
     if (m_root.isEmpty())
@@ -192,6 +283,7 @@ void VaultModel::scan() {
     const QString canonicalRoot = QDir(m_root).canonicalPath();
     if (canonicalRoot.isEmpty())
         return;
+    m_canonicalRoot = canonicalRoot;
 
     const QDir rootDir(canonicalRoot);
     QStringList queue{canonicalRoot};
@@ -268,13 +360,76 @@ void VaultModel::scan() {
     }
 }
 
-void VaultModel::applyFilter() {
-    m_filtered.clear();
-    m_filtered.reserve(m_entries.size());
-    for (qsizetype i = 0; i < m_entries.size(); ++i) {
-        if (m_filter.isEmpty()
-                || m_entries.at(i).relativePath.contains(m_filter, Qt::CaseInsensitive))
-            m_filtered.append(int(i));
+void VaultModel::rebuildRows() {
+    m_rows.clear();
+    m_visibleNotes = 0;
+
+    // A filter flattens the tree. What matters while typing is finding the
+    // note, not where in the folders it lives, so matches are listed with their
+    // parent directory beside them instead of nested under it.
+    if (!m_filter.isEmpty()) {
+        for (const Entry &entry : m_entries) {
+            if (!entry.relativePath.contains(m_filter, Qt::CaseInsensitive))
+                continue;
+            m_rows.append(Node{entry.title, entry.relativeDir, entry.relativePath,
+                               entry.path, entry.modified, 0, false});
+            ++m_visibleNotes;
+        }
+        return;
+    }
+
+    // Group the scanned files by their directory, and record every directory
+    // under its own parent. Only folders that hold a note somewhere below them
+    // ever appear.
+    QHash<QString, QList<int>> files;
+    QHash<QString, QStringList> subdirectories;
+    QSet<QString> known;
+    for (int i = 0; i < m_entries.size(); ++i) {
+        const QString directory = m_entries.at(i).relativeDir;
+        files[directory].append(i);
+        QString path = directory;
+        while (!path.isEmpty() && !known.contains(path)) {
+            known.insert(path);
+            const int slash = path.lastIndexOf(QLatin1Char('/'));
+            const QString parent = slash < 0 ? QString() : path.left(slash);
+            subdirectories[parent].append(path);
+            path = parent;
+        }
+    }
+
+    for (auto it = subdirectories.begin(); it != subdirectories.end(); ++it) {
+        std::sort(it->begin(), it->end(), [](const QString &a, const QString &b) {
+            return a.compare(b, Qt::CaseInsensitive) < 0;
+        });
+    }
+
+    appendDirectory(QString(), 0, files, subdirectories);
+}
+
+// Folders first, then the notes that sit directly in this one, both already in
+// the order the sort mode asked for.
+void VaultModel::appendDirectory(const QString &relativeDir, int depth,
+                                 const QHash<QString, QList<int>> &files,
+                                 const QHash<QString, QStringList> &subdirectories) {
+    const QStringList children = subdirectories.value(relativeDir);
+    for (const QString &child : children) {
+        Node node;
+        node.title = child.mid(child.lastIndexOf(QLatin1Char('/')) + 1);
+        node.relativeDir = relativeDir;
+        node.relativePath = child;
+        node.path = QDir(m_canonicalRoot).filePath(child);
+        node.depth = depth;
+        node.directory = true;
+        m_rows.append(node);
+        if (!m_collapsedFolders.contains(child))
+            appendDirectory(child, depth + 1, files, subdirectories);
+    }
+
+    for (int index : files.value(relativeDir)) {
+        const Entry &entry = m_entries.at(index);
+        m_rows.append(Node{entry.title, entry.relativeDir, entry.relativePath,
+                           entry.path, entry.modified, depth, false});
+        ++m_visibleNotes;
     }
 }
 

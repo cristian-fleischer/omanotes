@@ -25,14 +25,15 @@ ApplicationWindow {
     // `omarchy display text size` drives) anchored so its 12px default leaves
     // the app at the sizes it was designed around.
     readonly property real textScale: backend.textScale
-    readonly property int editorFontPixelSize: scaledSize(20)
+    readonly property int editorFontPixelSize:
+        Math.max(8, Math.round(20 * win.textScale * win.editorZoom))
     // What the editor column actually gets, which is the window less the
     // sidebar and the Flickable's own 24px margins. Measuring the window
     // instead would push the text column off the left edge once a sidebar
     // takes a third of the width.
     readonly property int editorAreaWidth:
         Math.max(1, width - (sidebarVisible ? sidebarWidth : 0) - 48)
-    readonly property int editorWidth: Math.min(
+    readonly property int editorWidth: fullWidth ? editorAreaWidth : Math.min(
         Math.max(120,
                  Math.min(Math.round(writerFontMetrics.averageCharacterWidth * 65),
                           Math.max(360, editorAreaWidth
@@ -49,19 +50,21 @@ ApplicationWindow {
     property bool awaitingPendingSave: false
     property bool sidebarVisible: true
     property int sidebarWidth: 260
+    // Ctrl+= and Ctrl+- scale the writing surface only. The chrome keeps
+    // following the desktop's text size, which is a different knob.
+    property real editorZoom: 1.0
+    property bool fullWidth: false
 
     Material.theme: darkMode ? Material.Dark : Material.Light
     Material.accent: backend.themeAccent
     color: pageColor
 
+    // An unsaved draft is kept, not argued about: closing the window writes it
+    // to the recovery snapshot and the next window opens on it, with the file on
+    // disk still untouched. Switching to another note still asks, because that
+    // one buffer is about to be replaced by another.
     onClosing: function(close) {
-        if (closeConfirmed || !backend.modified)
-            return;
-
-        close.accepted = false;
-        pendingAction = "close";
-        if (!unsavedChangesDialog.opened)
-            unsavedChangesDialog.open();
+        backend.persistDraft();
     }
 
     function requestOpen(url) {
@@ -115,6 +118,16 @@ ApplicationWindow {
             sidebar.focusFilter();
         else
             editor.forceActiveFocus();
+    }
+
+    function setZoom(zoom) {
+        win.editorZoom = Math.max(0.6, Math.min(2.5, Math.round(zoom * 100) / 100));
+        backend.saveViewState(win.editorZoom, win.fullWidth);
+    }
+
+    function toggleFullWidth() {
+        win.fullWidth = !win.fullWidth;
+        backend.saveViewState(win.editorZoom, win.fullWidth);
     }
 
     function toggleFullScreen() {
@@ -184,6 +197,30 @@ ApplicationWindow {
             searchField.forceActiveFocus();
             searchField.selectAll();
         }
+    }
+
+    Shortcut {
+        sequences: ["Ctrl+=", "Ctrl++"]
+        context: Qt.ApplicationShortcut
+        onActivated: win.setZoom(win.editorZoom + 0.1)
+    }
+
+    Shortcut {
+        sequence: "Ctrl+-"
+        context: Qt.ApplicationShortcut
+        onActivated: win.setZoom(win.editorZoom - 0.1)
+    }
+
+    Shortcut {
+        sequence: "Ctrl+0"
+        context: Qt.ApplicationShortcut
+        onActivated: win.setZoom(1.0)
+    }
+
+    Shortcut {
+        sequence: "Ctrl+M"
+        context: Qt.ApplicationShortcut
+        onActivated: win.toggleFullWidth()
     }
 
     Shortcut {
@@ -296,6 +333,10 @@ ApplicationWindow {
         // Whatever route a file arrived by, the sidebar highlights it.
         function onFileUrlChanged() {
             vault.setCurrentUrl(backend.fileUrl);
+
+        var view = backend.viewState();
+        win.editorZoom = view.zoom;
+        win.fullWidth = view.fullWidth;
         }
 
         function onOpenDialogRequested() {
@@ -398,7 +439,7 @@ ApplicationWindow {
             spacing: 12
 
             Label {
-                text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+Alt+N  New Note in the Vault\nCtrl+L  Toggle Sidebar\nCtrl+Shift+L  Focus the Note Filter\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
+                text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+Alt+N  New Note in the Vault\nCtrl+L  Toggle Sidebar\nCtrl+Shift+L  Focus the Note Filter\nCtrl+= / Ctrl+-  Zoom the Text\nCtrl+0  Reset the Zoom\nCtrl+M  Full Window Width\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
                 lineHeight: 1.5
             }
 
@@ -431,8 +472,11 @@ ApplicationWindow {
             textColor: win.textColor
             mutedColor: win.mutedColor
             accentColor: backend.themeAccent
+            documentModified: backend.modified
+            hasUntitledDraft: backend.modified && backend.untitled
 
             onNoteActivated: function(fileUrl) { win.openFromVault(fileUrl); }
+            onDraftActivated: editor.forceActiveFocus()
             onNewNoteRequested: win.createNote()
             onRootChangeRequested: vaultRootDialog.open()
             onDismissed: {
@@ -570,6 +614,12 @@ ApplicationWindow {
                     // finger scrolling carries pixel-precise pixelDelta.
                     acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
                     onWheel: function(wheel) {
+                        if (wheel.modifiers & Qt.ControlModifier) {
+                            if (wheel.angleDelta.y !== 0)
+                                win.setZoom(win.editorZoom + (wheel.angleDelta.y > 0 ? 0.1 : -0.1));
+                            wheel.accepted = true;
+                            return;
+                        }
                         scrollLinger.restart();
                         if (wheel.pixelDelta.y !== 0)
                             editorFlick.scrollTo(editorFlick.clampContentY(editorFlick.contentY - wheel.pixelDelta.y));
@@ -949,16 +999,32 @@ ApplicationWindow {
                 }
             }
 
-            Label {
+            Row {
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
                 anchors.rightMargin: 12
                 anchors.bottomMargin: 10
-                text: backend.wordCount + (backend.wordCount === 1 ? " Word" : " Words")
-                color: win.mutedColor
-                opacity: 0.75
-                font.family: "iA Writer Mono S"
-                font.pixelSize: win.scaledSize(11)
+                spacing: 12
+                height: win.scaledSize(16)
+
+                Label {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: backend.wordCount + (backend.wordCount === 1 ? " Word" : " Words")
+                    color: win.mutedColor
+                    opacity: 0.75
+                    font.family: "iA Writer Mono S"
+                    font.pixelSize: win.scaledSize(11)
+                }
+
+                FooterIconButton {
+                    anchors.verticalCenter: parent.verticalCenter
+                    objectName: "widthButton"
+                    iconName: "width"
+                    iconColor: win.fullWidth ? win.textColor : win.mutedColor
+                    opacity: 0.55
+                    tooltip: "Full window width (Ctrl+M)"
+                    onClicked: win.toggleFullWidth()
+                }
             }
 
 
