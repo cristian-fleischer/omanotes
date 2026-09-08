@@ -35,7 +35,7 @@ ApplicationWindow {
         Math.max(1, width - (sidebarVisible ? sidebarWidth : 0) - 48)
     readonly property int editorWidth: fullWidth ? editorAreaWidth : Math.min(
         Math.max(120,
-                 Math.min(Math.round(writerFontMetrics.averageCharacterWidth * 65),
+                 Math.min(Math.round(writerFontMetrics.averageCharacterWidth * win.contentColumns),
                           Math.max(360, editorAreaWidth
                                         - Math.round(writerFontMetrics.averageCharacterWidth * 20)))),
         editorAreaWidth)
@@ -54,6 +54,8 @@ ApplicationWindow {
     // the footer and dialogs keep their proportions whatever you pick here.
     readonly property string bundledFontFamily: "iA Writer Mono S"
     property string editorFontFamily: bundledFontFamily
+    // How wide the text column is, in characters. view/contentColumns.
+    property int contentColumns: 65
     // One entry per run of fenced-code lines: {y, height} in the editor's
     // coordinates. Recomputed after layout, never during it.
     property var codeSlabs: []
@@ -131,7 +133,8 @@ ApplicationWindow {
     function saveView() {
         backend.saveViewState(win.editorZoom, win.fullWidth,
                               win.editorFontFamily === win.bundledFontFamily
-                                  ? "" : win.editorFontFamily);
+                                  ? "" : win.editorFontFamily,
+                              win.contentColumns);
     }
 
     function setZoom(zoom) {
@@ -1428,6 +1431,10 @@ ApplicationWindow {
         win.fullWidth = view.fullWidth;
         if (view.fontFamily.length > 0)
             win.editorFontFamily = view.fontFamily;
+        win.contentColumns = view.contentColumns;
+        // Write them straight back, so every knob is in the config file to be
+        // found rather than appearing only once it has been changed.
+        saveView();
 
         var sidebarState = backend.sidebarState();
         win.sidebarWidth = sidebarState.width;

@@ -412,6 +412,8 @@ private slots:
         QVariantMap view = backend.viewState();
         QCOMPARE(view.value(QStringLiteral("zoom")).toDouble(), 1.0);
         QCOMPARE(view.value(QStringLiteral("fullWidth")).toBool(), true);
+        QCOMPARE(view.value(QStringLiteral("contentColumns")).toInt(), 65);
+        QCOMPARE(window->property("contentColumns").toInt(), 65);
 
         // The bundled family is stored as empty, so replacing the bundled font
         // in a later release changes the default for anyone who never picked.
@@ -454,7 +456,7 @@ private slots:
         QCOMPARE(editor->property("font").value<QFont>().family(), installed);
 
         QVERIFY(QMetaObject::invokeMethod(window.data(), "toggleFullWidth"));
-        backend.saveViewState(1.0, false, QString());
+        backend.saveViewState(1.0, false, QString(), 65);
     }
 
     // visibility reads Hidden by the time the window is torn down, so the state
@@ -1077,6 +1079,51 @@ private slots:
         QCOMPARE(model.count(), 1);
         model.setFilter(QString());
         QCOMPARE(model.count(), 3);
+    }
+
+    // The filter matches a path on its own. This adds what is written inside
+    // the notes, through ripgrep when it is installed and grep otherwise.
+    void vaultModelSearchesContent() {
+        if (QStandardPaths::findExecutable(QStringLiteral("rg")).isEmpty()
+                && QStandardPaths::findExecutable(QStringLiteral("grep")).isEmpty()) {
+            QSKIP("neither ripgrep nor grep is installed");
+        }
+
+        QTemporaryDir vault;
+        QVERIFY(vault.isValid());
+        const QString path = QDir(vault.path()).filePath(QStringLiteral("minutes.md"));
+        QFile note(path);
+        QVERIFY(note.open(QIODevice::WriteOnly));
+        note.write("# Minutes\n\nThe word ferroalloy appears only in here.\n");
+        note.close();
+        QVERIFY(writeNote(vault.path(), QStringLiteral("ferroalloy-by-name.md")));
+        QVERIFY(writeNote(vault.path(), QStringLiteral("unrelated.md")));
+
+        VaultModel model;
+        model.setRoot(vault.path());
+        QCOMPARE(model.count(), 3);
+
+        // The name match is immediate; the content match arrives when the
+        // search process finishes.
+        model.setFilter(QStringLiteral("ferroalloy"));
+        QCOMPARE(model.count(), 1);
+        QTRY_COMPARE_WITH_TIMEOUT(model.count(), 2, 5000);
+
+        const auto titles = titlesOf(model);
+        QVERIFY(titles.contains(QStringLiteral("minutes")));
+        QVERIFY(titles.contains(QStringLiteral("ferroalloy-by-name")));
+
+        // A note found only by its text says so, one found by name does not.
+        for (int row = 0; row < model.rowCount(); ++row) {
+            const bool byContent = roleOf(model, row, VaultModel::MatchesContentRole).toBool();
+            QCOMPARE(byContent, roleOf(model, row, VaultModel::TitleRole).toString()
+                                    == QStringLiteral("minutes"));
+        }
+
+        // Clearing goes back to everything, with no search left running.
+        model.setFilter(QString());
+        QCOMPARE(model.count(), 3);
+        QTRY_VERIFY_WITH_TIMEOUT(!model.searching(), 5000);
     }
 
     void vaultModelWatch() {

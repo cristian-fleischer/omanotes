@@ -125,7 +125,7 @@ public:
     Q_INVOKABLE void setCursorPosition(int position);
     Q_INVOKABLE QVariantMap viewState() const;
     Q_INVOKABLE void saveViewState(qreal zoom, bool fullWidth,
-                                   const QString &fontFamily);
+                                   const QString &fontFamily, int contentColumns);
     Q_INVOKABLE QVariantMap sidebarState() const;
     Q_INVOKABLE void saveSidebarState(bool visible, int width);
     Q_INVOKABLE QVariantMap windowGeometry() const;

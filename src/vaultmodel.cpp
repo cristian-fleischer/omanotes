@@ -34,6 +34,12 @@ VaultModel::VaultModel(QObject *parent) : QAbstractListModel(parent) {
     m_rescanTimer.setSingleShot(true);
     m_rescanTimer.setInterval(200);
     connect(&m_rescanTimer, &QTimer::timeout, this, &VaultModel::refresh);
+
+    // Searching the text of every note costs a process, so wait until the
+    // typing stops. The path filter is instant and carries the interim.
+    m_searchTimer.setSingleShot(true);
+    m_searchTimer.setInterval(220);
+    connect(&m_searchTimer, &QTimer::timeout, this, &VaultModel::startContentSearch);
     connect(&m_watcher, &QFileSystemWatcher::directoryChanged, this,
             [this]() { m_rescanTimer.start(); });
 }
@@ -74,6 +80,95 @@ void VaultModel::setFilter(const QString &filter) {
 
     m_filter = filter;
     emit filterChanged();
+
+    m_contentMatches.clear();
+    if (m_search) {
+        m_search->kill();
+        m_search->deleteLater();
+        m_search = nullptr;
+    }
+    // One character matches most of a vault, and the path filter already covers
+    // it. Below that a text search is only noise and processes.
+    if (m_filter.size() >= 2)
+        m_searchTimer.start();
+    else
+        m_searchTimer.stop();
+
+    if (m_searchRunning) {
+        m_searchRunning = false;
+        emit searchingChanged();
+    }
+
+    resetRows();
+}
+
+// ripgrep when it is installed, grep otherwise, and nothing at all if neither
+// is. The pattern is passed as an argument and as a fixed string, so no shell
+// sees it and nothing in a note's text is treated as a pattern.
+void VaultModel::startContentSearch() {
+    if (m_root.isEmpty() || m_filter.size() < 2)
+        return;
+
+    static const QString ripgrep = QStandardPaths::findExecutable(QStringLiteral("rg"));
+    static const QString grep = QStandardPaths::findExecutable(QStringLiteral("grep"));
+
+    QString program;
+    QStringList arguments;
+    if (!ripgrep.isEmpty()) {
+        program = ripgrep;
+        arguments = QStringList{QStringLiteral("--files-with-matches"),
+                                QStringLiteral("--fixed-strings"),
+                                QStringLiteral("--ignore-case"),
+                                QStringLiteral("--no-messages"),
+                                QStringLiteral("--glob=*.md"),
+                                QStringLiteral("--glob=*.markdown"),
+                                QStringLiteral("--"),
+                                m_filter,
+                                m_root};
+    } else if (!grep.isEmpty()) {
+        program = grep;
+        arguments = QStringList{QStringLiteral("-r"), QStringLiteral("-i"),
+                                QStringLiteral("-l"), QStringLiteral("-F"),
+                                QStringLiteral("--include=*.md"),
+                                QStringLiteral("--include=*.markdown"),
+                                QStringLiteral("-e"), m_filter,
+                                QStringLiteral("--"), m_root};
+    } else {
+        return;
+    }
+
+    m_search = new QProcess(this);
+    m_search->setProcessChannelMode(QProcess::MergedChannels);
+    connect(m_search, &QProcess::finished, this, &VaultModel::collectContentMatches);
+    m_search->start(program, arguments);
+
+    m_searchRunning = true;
+    emit searchingChanged();
+}
+
+void VaultModel::collectContentMatches() {
+    if (!m_search)
+        return;
+
+    const QList<QByteArray> lines = m_search->readAll().split('\n');
+    m_search->deleteLater();
+    m_search = nullptr;
+    m_searchRunning = false;
+    emit searchingChanged();
+
+    QSet<QString> matches;
+    for (const QByteArray &line : lines) {
+        const QString path = QString::fromUtf8(line).trimmed();
+        if (path.isEmpty())
+            continue;
+        const QString canonical = QFileInfo(path).canonicalFilePath();
+        if (!canonical.isEmpty())
+            matches.insert(canonical);
+    }
+    if (matches == m_contentMatches)
+        return;
+
+    m_contentMatches = matches;
     resetRows();
 }
 
@@ -162,6 +257,10 @@ QVariant VaultModel::data(const QModelIndex &index, int role) const {
         return node.directory && !m_collapsedFolders.contains(node.relativePath);
     case HasDraftRole:
         return !node.directory && m_draftPaths.contains(node.path);
+    case MatchesContentRole:
+        return !node.directory && !m_filter.isEmpty()
+            && !node.relativePath.contains(m_filter, Qt::CaseInsensitive)
+            && m_contentMatches.contains(node.path);
     default:
         return {};
     }
@@ -176,7 +275,8 @@ QHash<int, QByteArray> VaultModel::roleNames() const {
             {DepthRole, "depth"},
             {IsDirectoryRole, "isDirectory"},
             {IsExpandedRole, "isExpanded"},
-            {HasDraftRole, "hasDraft"}};
+            {HasDraftRole, "hasDraft"},
+            {MatchesContentRole, "matchesContent"}};
 }
 
 QUrl VaultModel::urlAt(int row) const {
@@ -386,7 +486,8 @@ void VaultModel::rebuildRows() {
     // parent directory beside them instead of nested under it.
     if (!m_filter.isEmpty()) {
         for (const Entry &entry : m_entries) {
-            if (!entry.relativePath.contains(m_filter, Qt::CaseInsensitive))
+            if (!entry.relativePath.contains(m_filter, Qt::CaseInsensitive)
+                    && !m_contentMatches.contains(entry.path))
                 continue;
             m_rows.append(Node{entry.title, entry.relativeDir, entry.relativePath,
                                entry.path, entry.modified, 0, false});

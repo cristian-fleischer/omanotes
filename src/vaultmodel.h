@@ -8,6 +8,7 @@
 #include <QSet>
 #include <QString>
 #include <QStringList>
+#include <QProcess>
 #include <QTimer>
 #include <QUrl>
 
@@ -22,6 +23,8 @@ class VaultModel : public QAbstractListModel {
     Q_PROPERTY(int count READ count NOTIFY countChanged)
     Q_PROPERTY(int totalCount READ totalCount NOTIFY countChanged)
     Q_PROPERTY(bool truncated READ truncated NOTIFY countChanged)
+    // True while a content search for the current filter is still running.
+    Q_PROPERTY(bool searching READ searching NOTIFY searchingChanged)
 
 public:
     enum Role {
@@ -34,6 +37,7 @@ public:
         IsDirectoryRole,
         IsExpandedRole,
         HasDraftRole,
+        MatchesContentRole,
     };
     Q_ENUM(Role)
 
@@ -55,6 +59,7 @@ public:
     int count() const { return m_visibleNotes; }
     int totalCount() const { return int(m_entries.size()); }
     bool truncated() const { return m_truncated; }
+    bool searching() const { return m_searchRunning; }
 
     int rowCount(const QModelIndex &parent = QModelIndex()) const override;
     QVariant data(const QModelIndex &index, int role) const override;
@@ -88,6 +93,7 @@ signals:
     void sortModeChanged();
     void currentPathChanged();
     void countChanged();
+    void searchingChanged();
 
 private:
     // One Markdown file found by the scan.
@@ -119,6 +125,8 @@ private:
     bool expandAncestorsOf(const QString &relativeDir);
     void saveCollapsedFolders();
     void rewatch();
+    void startContentSearch();
+    void collectContentMatches();
 
     QString m_root;
     QString m_filter;
@@ -131,6 +139,12 @@ private:
     QList<Node> m_rows;
     QSet<QString> m_collapsedFolders;
     QSet<QString> m_draftPaths;
+    // Notes whose text matches the filter, found by ripgrep or grep. The
+    // filter matches a path on its own; this adds what is written inside.
+    QSet<QString> m_contentMatches;
+    QProcess *m_search = nullptr;
+    QTimer m_searchTimer;
+    bool m_searchRunning = false;
     QStringList m_scannedDirectories;
     QFileSystemWatcher m_watcher;
     QTimer m_rescanTimer;

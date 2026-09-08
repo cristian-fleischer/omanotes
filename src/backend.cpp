@@ -900,14 +900,22 @@ QVariantMap Backend::viewState() const {
              settings.value(QStringLiteral("view/fullWidth"), false).toBool()},
             // Empty means the bundled iA Writer Mono S.
             {QStringLiteral("fontFamily"),
-             settings.value(QStringLiteral("view/fontFamily")).toString()}};
+             settings.value(QStringLiteral("view/fontFamily")).toString()},
+            // How wide the text column is, in characters, when it is not set to
+            // fill the window.
+            {QStringLiteral("contentColumns"),
+             qBound(20, settings.value(QStringLiteral("view/contentColumns"), 65).toInt(), 300)}};
 }
 
-void Backend::saveViewState(qreal zoom, bool fullWidth, const QString &fontFamily) {
+void Backend::saveViewState(qreal zoom, bool fullWidth, const QString &fontFamily,
+                            int contentColumns) {
     QSettings settings;
     settings.setValue(QStringLiteral("view/zoom"), zoom);
     settings.setValue(QStringLiteral("view/fullWidth"), fullWidth);
+    // Written even when empty, so every knob is visible in the file rather than
+    // only after it has been changed once.
     settings.setValue(QStringLiteral("view/fontFamily"), fontFamily);
+    settings.setValue(QStringLiteral("view/contentColumns"), contentColumns);
 }
 
 QVariantMap Backend::sidebarState() const {
