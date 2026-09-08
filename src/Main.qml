@@ -785,6 +785,39 @@ ApplicationWindow {
                     }
                     onCursorRectangleChanged: editorFlick.ensureCursorVisible()
 
+                    // Both handlers take the default DragThreshold policy, a
+                    // passive grab, so the caret and selection still work
+                    // exactly as they did.
+                    TapHandler {
+                        acceptedModifiers: Qt.ControlModifier
+                        onSingleTapped: function(point) {
+                            var target = backend.linkTargetAt(
+                                editor.positionAt(point.position.x, point.position.y));
+                            if (target !== "")
+                                backend.openTarget(target);
+                        }
+                    }
+
+                    TapHandler {
+                        acceptedModifiers: Qt.NoModifier
+                        onSingleTapped: function(point) {
+                            editor.toggleTaskAt(
+                                editor.positionAt(point.position.x, point.position.y));
+                        }
+                    }
+
+                    // A task item is a checkbox: clicking the brackets flips it,
+                    // through the same mutation the keyboard uses so one undo
+                    // puts it back.
+                    function toggleTaskAt(position) {
+                        var marker = backend.taskMarkerAt(position);
+                        if (marker < 0)
+                            return;
+                        var done = text.slice(marker, marker + 1) !== " ";
+                        EditorMutations.replaceRange(editor, marker, marker + 1,
+                                                     done ? " " : "x");
+                    }
+
                     function replaceSelectionWith(replacement) {
                         var start = Math.min(selectionStart, selectionEnd);
                         var end = Math.max(selectionStart, selectionEnd);

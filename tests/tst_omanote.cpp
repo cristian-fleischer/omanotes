@@ -64,6 +64,53 @@ private slots:
 
     // Leaving a note with unsaved text used to stop and ask. It keeps the text
     // under that note instead, and the sidebar marks it.
+    void findsLinkTargetsAndTaskMarkers() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        QVERIFY(writeNote(directory.path(), QStringLiteral("note.md")));
+        QVERIFY(writeNote(directory.path(), QStringLiteral("sibling.md")));
+
+        QQmlEngine engine;
+        QScopedPointer<QObject> editor(createEditor(&engine));
+        QVERIFY(editor);
+        Backend backend;
+        backend.attachDocument(editor->property("textDocument").value<QObject *>());
+        backend.open(QUrl::fromLocalFile(directory.filePath(QStringLiteral("note.md"))));
+
+        const QString body = QStringLiteral(
+            "See [the site](https://example.com/a) and https://plain.example/b too.\n"
+            "- [ ] open task\n"
+            "- [x] done task\n"
+            "Read sibling.md for more.\n"
+            "Nothing here.");
+        QVERIFY(QMetaObject::invokeMethod(editor.data(), "insert", Q_ARG(int, 0),
+                                          Q_ARG(QString, body)));
+
+        QTextDocument *document =
+            qobject_cast<QQuickTextDocument *>(
+                editor->property("textDocument").value<QObject *>())->textDocument();
+        const auto at = [document](int line, int column) {
+            return document->findBlockByNumber(line).position() + column;
+        };
+
+        // Clicking the label of a Markdown link opens its destination.
+        QCOMPARE(backend.linkTargetAt(at(0, 7)), QStringLiteral("https://example.com/a"));
+        // A bare URL works, and the full stop after it is not part of it.
+        QCOMPARE(backend.linkTargetAt(at(0, 48)), QStringLiteral("https://plain.example/b"));
+        // A file beside the note resolves; a word does not.
+        QCOMPARE(backend.linkTargetAt(at(3, 7)), QStringLiteral("sibling.md"));
+        QCOMPARE(backend.linkTargetAt(at(4, 3)), QString());
+
+        // The whole `[ ]` is clickable, not just the character between them.
+        QCOMPARE(backend.taskMarkerAt(at(1, 2)), at(1, 3));
+        QCOMPARE(backend.taskMarkerAt(at(1, 3)), at(1, 3));
+        QCOMPARE(backend.taskMarkerAt(at(1, 4)), at(1, 3));
+        QCOMPARE(backend.taskMarkerAt(at(2, 3)), at(2, 3));
+        // Not on the text, and not on a line that is not a task.
+        QCOMPARE(backend.taskMarkerAt(at(1, 8)), -1);
+        QCOMPARE(backend.taskMarkerAt(at(4, 2)), -1);
+    }
+
     void keepsADraftPerNote() {
         clearRecoverySnapshots();
 
@@ -984,6 +1031,25 @@ private slots:
         const QVariantMap state = backend.sidebarState();
         QCOMPARE(state.value(QStringLiteral("visible")).toBool(), false);
         QCOMPARE(state.value(QStringLiteral("width")).toInt(), 320);
+
+        // Clicking a checkbox flips it, through the same mutation the keyboard
+        // uses, so one undo puts it back.
+        QObject *taskEditor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QVERIFY(taskEditor);
+        taskEditor->setProperty("text", QStringLiteral("- [ ] a task"));
+        QVERIFY(QMetaObject::invokeMethod(taskEditor, "toggleTaskAt",
+                                          Q_ARG(QVariant, QVariant(3))));
+        QCOMPARE(taskEditor->property("text").toString(), QStringLiteral("- [x] a task"));
+        QVERIFY(QMetaObject::invokeMethod(taskEditor, "toggleTaskAt",
+                                          Q_ARG(QVariant, QVariant(3))));
+        QCOMPARE(taskEditor->property("text").toString(), QStringLiteral("- [ ] a task"));
+        // A click anywhere else leaves the text alone.
+        QVERIFY(QMetaObject::invokeMethod(taskEditor, "toggleTaskAt",
+                                          Q_ARG(QVariant, QVariant(9))));
+        QCOMPARE(taskEditor->property("text").toString(), QStringLiteral("- [ ] a task"));
+        taskEditor->setProperty("text", QString());
+
+        Q_UNUSED(taskEditor)
     }
 
     void preservesLineEndingsAndByteOrderMark() {

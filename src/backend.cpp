@@ -471,6 +471,112 @@ void Backend::setSearchHighlight(const QString &query, int currentMatchStart) {
         m_highlighter->setSearch(query, currentMatchStart);
 }
 
+int Backend::taskMarkerAt(int position) const {
+    if (!m_document)
+        return -1;
+
+    const QTextBlock block =
+        m_document->findBlock(qBound(0, position, m_document->characterCount() - 1));
+    if (!block.isValid())
+        return -1;
+
+    static const QRegularExpression taskRe(
+        QStringLiteral("^\\s*(?:[-+*]|\\d+[.)])\\s+\\[([ xX])\\]"));
+    const QRegularExpressionMatch task = taskRe.match(block.text());
+    if (!task.hasMatch())
+        return -1;
+
+    // The whole `[ ]` is the target, so the click does not have to land on the
+    // one character between the brackets.
+    const int markerStart = int(task.capturedStart(1)) - 1;
+    const int markerEnd = int(task.capturedEnd(1)) + 1;
+    const int inBlock = position - block.position();
+    if (inBlock < markerStart || inBlock > markerEnd)
+        return -1;
+    return block.position() + int(task.capturedStart(1));
+}
+
+QString Backend::linkTargetAt(int position) const {
+    if (!m_document)
+        return {};
+
+    const QTextBlock block =
+        m_document->findBlock(qBound(0, position, m_document->characterCount() - 1));
+    if (!block.isValid())
+        return {};
+
+    const QString text = block.text();
+    const int inBlock = position - block.position();
+
+    // A Markdown link wins: the destination is what the reader means, not the
+    // words they clicked on.
+    static const QRegularExpression linkRe(
+        QStringLiteral("!?\\[[^\\]]*\\]\\(((?:\\\\.|[^)])+)\\)"));
+    QRegularExpressionMatchIterator links = linkRe.globalMatch(text);
+    while (links.hasNext()) {
+        const QRegularExpressionMatch link = links.next();
+        if (inBlock >= link.capturedStart(0) && inBlock <= link.capturedEnd(0))
+            return link.captured(1).trimmed();
+    }
+
+    // Then anything that looks like a URL or a path, bounded by whitespace and
+    // the brackets Markdown wraps things in.
+    static const QRegularExpression tokenRe(QStringLiteral("[^\\s<>()\\[\\]\"\'`]+"));
+    QRegularExpressionMatchIterator tokens = tokenRe.globalMatch(text);
+    while (tokens.hasNext()) {
+        const QRegularExpressionMatch token = tokens.next();
+        if (inBlock < token.capturedStart(0) || inBlock > token.capturedEnd(0))
+            continue;
+
+        QString candidate = token.captured(0);
+        // Trailing punctuation belongs to the sentence, not the link.
+        while (!candidate.isEmpty()
+                && QStringLiteral(".,;:!?").contains(candidate.back()))
+            candidate.chop(1);
+        if (candidate.isEmpty())
+            return {};
+        if (!normalizedLinkUrl(candidate).isEmpty())
+            return candidate;
+        if (!resolveLocalPath(candidate).isEmpty())
+            return candidate;
+        return {};
+    }
+
+    return {};
+}
+
+// Absolute path for a token, if it names something that exists. Relative names
+// are resolved next to the open note, which is what a note means by them.
+QString Backend::resolveLocalPath(const QString &token) const {
+    if (token.isEmpty() || token.contains(QLatin1Char(':')))
+        return {};
+
+    QString path = token;
+    if (path == QStringLiteral("~") || path.startsWith(QStringLiteral("~/")))
+        path.replace(0, 1, QDir::homePath());
+
+    QFileInfo info(path);
+    if (info.isRelative() && m_fileUrl.isLocalFile()) {
+        const QDir noteDirectory = QFileInfo(m_fileUrl.toLocalFile()).absoluteDir();
+        info = QFileInfo(noteDirectory.filePath(path));
+    }
+    return info.exists() ? info.absoluteFilePath() : QString();
+}
+
+void Backend::openTarget(const QString &target) const {
+    const QString url = normalizedLinkUrl(target);
+    if (!url.isEmpty()) {
+        QDesktopServices::openUrl(QUrl(url));
+        return;
+    }
+
+    // A path is only opened when it actually names something, so a stray word
+    // in a note cannot hand an arbitrary string to the desktop.
+    const QString path = resolveLocalPath(target);
+    if (!path.isEmpty())
+        QDesktopServices::openUrl(QUrl::fromLocalFile(path));
+}
+
 void Backend::openExternalUrl(const QUrl &url) {
     const QString scheme = url.scheme().toLower();
     if (scheme == QStringLiteral("http") || scheme == QStringLiteral("https")

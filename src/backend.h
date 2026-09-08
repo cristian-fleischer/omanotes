@@ -95,6 +95,11 @@ public:
     Q_INVOKABLE QVariantList hiddenRangesAt(int position) const;
     Q_INVOKABLE void setSearchHighlight(const QString &query, int currentMatchStart);
     Q_INVOKABLE void openExternalUrl(const QUrl &url);
+    // The link or path under a document position, empty when there is none.
+    Q_INVOKABLE QString linkTargetAt(int position) const;
+    Q_INVOKABLE void openTarget(const QString &target) const;
+    // Document position of a task item's mark, or -1.
+    Q_INVOKABLE int taskMarkerAt(int position) const;
     // The portal font chooser can hand back a styled name such as
     // "iA Writer Mono S Bold". Resolve it to a family the font database
     // knows, or to nothing, which means the bundled font.
@@ -134,6 +139,7 @@ private:
     void saveTo(const QUrl &url);
     QUrl suggestedSaveUrl() const;
     QString currentDocumentText() const;
+    QString resolveLocalPath(const QString &token) const;
     void setWordCount(int words);
     void refreshWordCount();
     void scheduleWordCount();
