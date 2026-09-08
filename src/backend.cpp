@@ -415,11 +415,14 @@ void Backend::openExternalUrl(const QUrl &url) {
         QDesktopServices::openUrl(url);
 }
 
+// Every getter here converts before returning. QSettings hands INI values back
+// as strings, and the string "false" is a true bool the moment QML touches it.
 QVariantMap Backend::viewState() const {
     QSettings settings;
-    return {{QStringLiteral("zoom"), settings.value(QStringLiteral("view/zoom"), 1.0)},
+    return {{QStringLiteral("zoom"),
+             settings.value(QStringLiteral("view/zoom"), 1.0).toDouble()},
             {QStringLiteral("fullWidth"),
-             settings.value(QStringLiteral("view/fullWidth"), false)}};
+             settings.value(QStringLiteral("view/fullWidth"), false).toBool()}};
 }
 
 void Backend::saveViewState(qreal zoom, bool fullWidth) {
@@ -431,9 +434,9 @@ void Backend::saveViewState(qreal zoom, bool fullWidth) {
 QVariantMap Backend::sidebarState() const {
     QSettings settings;
     return {{QStringLiteral("visible"),
-             settings.value(QStringLiteral("vault/sidebarVisible"), false)},
+             settings.value(QStringLiteral("vault/sidebarVisible"), false).toBool()},
             {QStringLiteral("width"),
-             settings.value(QStringLiteral("vault/sidebarWidth"), 260)}};
+             settings.value(QStringLiteral("vault/sidebarWidth"), 260).toInt()}};
 }
 
 void Backend::saveSidebarState(bool visible, int width) {
@@ -444,11 +447,14 @@ void Backend::saveSidebarState(bool visible, int width) {
 
 QVariantMap Backend::windowGeometry() const {
     QSettings settings;
-    return {{QStringLiteral("x"), settings.value(QStringLiteral("window/x"), -1)},
-            {QStringLiteral("y"), settings.value(QStringLiteral("window/y"), -1)},
-            {QStringLiteral("width"), settings.value(QStringLiteral("window/width"), 1280)},
-            {QStringLiteral("height"), settings.value(QStringLiteral("window/height"), 820)},
-            {QStringLiteral("maximized"), settings.value(QStringLiteral("window/maximized"), false)}};
+    return {{QStringLiteral("x"), settings.value(QStringLiteral("window/x"), -1).toInt()},
+            {QStringLiteral("y"), settings.value(QStringLiteral("window/y"), -1).toInt()},
+            {QStringLiteral("width"),
+             settings.value(QStringLiteral("window/width"), 1280).toInt()},
+            {QStringLiteral("height"),
+             settings.value(QStringLiteral("window/height"), 820).toInt()},
+            {QStringLiteral("maximized"),
+             settings.value(QStringLiteral("window/maximized"), false).toBool()}};
 }
 
 void Backend::saveWindowGeometry(int x, int y, int width, int height, bool maximized) {

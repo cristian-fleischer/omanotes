@@ -28,6 +28,35 @@ private slots:
 
     // Closing the window is not a decision about the text: what was typed comes
     // back in the next window, the way Sublime Text's hot exit works.
+    // An INI file holds "false" as text. Read back untyped it becomes a true
+    // bool in QML, and the window opens with a sidebar nobody asked for.
+    void readsSettingsBackAsTypes() {
+        QSettings settings;
+        settings.setValue(QStringLiteral("vault/sidebarVisible"), QStringLiteral("false"));
+        settings.setValue(QStringLiteral("vault/sidebarWidth"), QStringLiteral("312"));
+        settings.setValue(QStringLiteral("view/fullWidth"), QStringLiteral("false"));
+        settings.setValue(QStringLiteral("view/zoom"), QStringLiteral("1.4"));
+        settings.setValue(QStringLiteral("window/maximized"), QStringLiteral("false"));
+
+        Backend backend;
+        const QVariantMap sidebar = backend.sidebarState();
+        QCOMPARE(sidebar.value(QStringLiteral("visible")).typeId(), QMetaType::Bool);
+        QCOMPARE(sidebar.value(QStringLiteral("visible")).toBool(), false);
+        QCOMPARE(sidebar.value(QStringLiteral("width")).toInt(), 312);
+
+        const QVariantMap view = backend.viewState();
+        QCOMPARE(view.value(QStringLiteral("fullWidth")).typeId(), QMetaType::Bool);
+        QCOMPARE(view.value(QStringLiteral("fullWidth")).toBool(), false);
+        QCOMPARE(view.value(QStringLiteral("zoom")).toDouble(), 1.4);
+
+        QCOMPARE(backend.windowGeometry().value(QStringLiteral("maximized")).typeId(),
+                 QMetaType::Bool);
+
+        settings.remove(QStringLiteral("vault"));
+        settings.remove(QStringLiteral("view"));
+        settings.remove(QStringLiteral("window"));
+    }
+
     void keepsUnsavedDraftAcrossRestart() {
         clearRecoverySnapshots();
 
