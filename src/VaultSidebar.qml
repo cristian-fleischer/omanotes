@@ -319,7 +319,8 @@ Rectangle {
                             text: title
                             color: isDirectory ? sidebar.mutedColor : sidebar.textColor
                             elide: Text.ElideRight
-                            font.pixelSize: sidebar.scaledSize(13)
+                            // A folder sits a step above the notes under it.
+                            font.pixelSize: sidebar.scaledSize(isDirectory ? 14 : 13)
                         }
 
                         Text {

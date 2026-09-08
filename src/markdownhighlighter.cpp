@@ -304,12 +304,20 @@ void MarkdownHighlighter::rebuildFormats() {
     m_hiddenMarkerFormat.setFontLetterSpacingType(QFont::AbsoluteSpacing);
     m_hiddenMarkerFormat.setFontLetterSpacing(-charWidth);
 
-    // H1 is half again as large as the body; H6 matches it and is told apart by
-    // weight alone, the way the levels differ in print.
-    static const qreal headingScale[6] = {1.6, 1.4, 1.25, 1.15, 1.05, 1.0};
+    // Six levels. The steps between the middle ones used to be 10 to 15 per
+    // cent, which is not enough to tell an H2 from an H4 at a glance, so the
+    // scale is wider and size is not the only cue: the deeper levels fade
+    // towards the marker colour as well.
+    static const qreal headingScale[6] = {1.9, 1.6, 1.38, 1.22, 1.1, 1.0};
+    static const qreal headingFade[6] = {0.0, 0.0, 0.0, 0.18, 0.34, 0.5};
     for (int level = 0; level < 6; ++level) {
         m_headingFormats[level] = QTextCharFormat();
-        m_headingFormats[level].setForeground(text);
+        const qreal fade = headingFade[level];
+        m_headingFormats[level].setForeground(
+            fade <= 0 ? text
+                      : QColor::fromRgbF(text.redF() * (1 - fade) + marker.redF() * fade,
+                                         text.greenF() * (1 - fade) + marker.greenF() * fade,
+                                         text.blueF() * (1 - fade) + marker.blueF() * fade));
         m_headingFormats[level].setFontWeight(QFont::Bold);
         if (m_formatFont.pointSizeF() > 0) {
             m_headingFormats[level].setFontPointSize(m_formatFont.pointSizeF()
@@ -657,6 +665,11 @@ void MarkdownHighlighter::highlightInline(const QString &text) {
                 merged.setFontItalic(true);
                 merged.setForeground(m_italicFormat.foreground());
                 break;
+            case InlineKind::BoldItalic:
+                merged.setFontWeight(QFont::Bold);
+                merged.setFontItalic(true);
+                merged.setForeground(m_boldFormat.foreground());
+                break;
             case InlineKind::Strikethrough:
                 merged.setFontStrikeOut(true);
                 merged.setForeground(m_strikeFormat.foreground());
@@ -706,10 +719,34 @@ MarkdownHighlighter::inlineMarkup(const QString &text, bool insideFencedCode) {
                        int(heading.capturedLength(1))});
     }
 
+    // `***both***` first, and its span is then off limits to the bold and
+    // italic patterns: `**` would otherwise claim the outer pair and leave the
+    // third asterisk sitting in the text.
+    QList<Span> emphasised;
+    static const QRegularExpression boldItalicRe(QStringLiteral("(\\*\\*\\*|___)(.+?)(\\1)"));
+    QRegularExpressionMatchIterator boldItalicMatches = boldItalicRe.globalMatch(text);
+    while (boldItalicMatches.hasNext()) {
+        const QRegularExpressionMatch match = boldItalicMatches.next();
+        emphasised.append(span(match, 0));
+        markup.append({InlineKind::BoldItalic, span(match, 2),
+                       {span(match, 1), span(match, 3)}});
+    }
+
+    const auto insideEmphasis = [&emphasised](const Span &candidate) {
+        for (const Span &taken : emphasised) {
+            if (candidate.start < taken.start + taken.length
+                    && taken.start < candidate.start + candidate.length)
+                return true;
+        }
+        return false;
+    };
+
     static const QRegularExpression boldRe(QStringLiteral("(\\*\\*|__)(.+?)(\\1)"));
     QRegularExpressionMatchIterator boldMatches = boldRe.globalMatch(text);
     while (boldMatches.hasNext()) {
         const QRegularExpressionMatch match = boldMatches.next();
+        if (insideEmphasis(span(match, 0)))
+            continue;
         markup.append({InlineKind::Bold, span(match, 2),
                        {span(match, 1), span(match, 3)}});
     }
@@ -720,6 +757,8 @@ MarkdownHighlighter::inlineMarkup(const QString &text, bool insideFencedCode) {
     while (italicMatches.hasNext()) {
         const QRegularExpressionMatch match = italicMatches.next();
         const Span whole = span(match, 0);
+        if (insideEmphasis(whole))
+            continue;
         const int contentIndex = match.capturedStart(1) >= 0 ? 1 : 2;
         markup.append({InlineKind::Italic, span(match, contentIndex),
                        {{whole.start, 1}, {whole.start + whole.length - 1, 1}}});

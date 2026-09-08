@@ -791,11 +791,13 @@ ApplicationWindow {
                     Repeater {
                         model: win.codeSlabs
                         Rectangle {
-                            x: -win.scaledSize(12)
-                            width: codeSlabLayer.width + win.scaledSize(24)
-                            y: modelData.y
-                            height: modelData.height
-                            radius: win.scaledSize(4)
+                            // Padding on all four sides, so the code sits in
+                            // the slab rather than against its edges.
+                            x: -win.scaledSize(14)
+                            width: codeSlabLayer.width + win.scaledSize(28)
+                            y: modelData.y - win.scaledSize(7)
+                            height: modelData.height + win.scaledSize(14)
+                            radius: win.scaledSize(5)
                             color: backend.themeCodeBackground
                         }
                     }

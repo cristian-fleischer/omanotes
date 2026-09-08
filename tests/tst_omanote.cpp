@@ -214,6 +214,41 @@ private slots:
     // Box-drawing characters join only when the font draws them at least as
     // tall as its own line. Having the glyphs is not enough: Noto Sans Mono has
     // them at 0.92 of its line spacing, so every diagram comes out dashed.
+    void boldAndItalicTogether() {
+        // `**` would claim the outer pair of `***both***` and leave the third
+        // asterisk in the text, so the three-marker form is matched first and
+        // its span is off limits to the other two.
+        const auto markup = MarkdownHighlighter::inlineMarkup(
+            QStringLiteral("a ***both*** b"));
+        QCOMPARE(markup.size(), 1);
+        QVERIFY(markup.constFirst().kind == MarkdownHighlighter::InlineKind::BoldItalic);
+        QCOMPARE(markup.constFirst().content.start, 5);
+        QCOMPARE(markup.constFirst().content.length, 4);
+        QCOMPARE(markup.constFirst().markers[0].length, 3);
+        QCOMPARE(markup.constFirst().markers[1].length, 3);
+
+        QCOMPARE(MarkdownHighlighter::inlineMarkup(QStringLiteral("___both___")).size(), 1);
+
+        QTextDocument document;
+        document.setDefaultFont(bodyFont());
+        MarkdownHighlighter highlighter(&document);
+        setDocumentText(document, QStringLiteral(
+            "***both*** and **bold with *nested* inside**"));
+
+        const QTextCharFormat together = formatAt(document, 0, 4);
+        QCOMPARE(together.fontWeight(), int(QFont::Bold));
+        QVERIFY(together.fontItalic());
+
+        // Nesting the other way round has always worked, and still does.
+        const QTextCharFormat nested = formatAt(document, 0, 33);
+        QCOMPARE(nested.fontWeight(), int(QFont::Bold));
+        QVERIFY(nested.fontItalic());
+
+        // The plain bold around it is bold and not italic.
+        QCOMPARE(formatAt(document, 0, 18).fontWeight(), int(QFont::Bold));
+        QVERIFY(!formatAt(document, 0, 18).fontItalic());
+    }
+
     void fencedCodeIsSyntaxHighlighted() {
         QTextDocument document;
         document.setDefaultFont(bodyFont());
@@ -488,7 +523,7 @@ private slots:
         setDocumentText(document, QStringLiteral("## Heading\nbody"));
 
         const QTextCharFormat content = formatAt(document, 0, 3);
-        QCOMPARE(content.fontPointSize(), 12.0 * 1.4);
+        QCOMPARE(content.fontPointSize(), 12.0 * 1.6);
         QCOMPARE(content.fontWeight(), int(QFont::Bold));
 
         // The `##` and the space after it collapse to nothing, or the heading
@@ -508,7 +543,22 @@ private slots:
         QCOMPARE(markup.at(0).markers[0].length, 3);
 
         setDocumentText(document, QStringLiteral("# One\n###### Six"));
-        QCOMPARE(formatAt(document, 0, 2).fontPointSize(), 12.0 * 1.6);
+
+        // Each level is a clear step from the one above, and the deep ones fade
+        // as well, so H2 and H4 are not a guess.
+        double previous = 0;
+        for (int level = 1; level <= 6; ++level) {
+            QTextDocument levels;
+            levels.setDefaultFont(bodyFont());
+            MarkdownHighlighter each(&levels);
+            setDocumentText(levels, QString(level, QLatin1Char('#'))
+                                        + QStringLiteral(" Heading"));
+            const double size = formatAt(levels, 0, level + 1).fontPointSize();
+            if (previous > 0)
+                QVERIFY2(previous - size >= 1.0, qPrintable(QString::number(size)));
+            previous = size;
+        }
+        QCOMPARE(formatAt(document, 0, 2).fontPointSize(), 12.0 * 1.9);
         QCOMPARE(formatAt(document, 1, 7).fontPointSize(), 12.0);
     }
 
@@ -625,8 +675,8 @@ private slots:
         MarkdownHighlighter highlighter(&document);
         setDocumentText(document, QStringLiteral("Title\n=====\n\nSub\n---\n\nbody\n\n---"));
 
-        QCOMPARE(formatAt(document, 0, 0).fontPointSize(), 12.0 * 1.6);
-        QCOMPARE(formatAt(document, 3, 0).fontPointSize(), 12.0 * 1.4);
+        QCOMPARE(formatAt(document, 0, 0).fontPointSize(), 12.0 * 1.9);
+        QCOMPARE(formatAt(document, 3, 0).fontPointSize(), 12.0 * 1.6);
 
         // The underline reads as a marker, the way a thematic break does.
         QVERIFY(formatAt(document, 1, 0).foreground().style() != Qt::NoBrush);

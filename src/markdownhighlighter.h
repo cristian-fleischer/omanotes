@@ -42,7 +42,7 @@ public:
         int length;
     };
 
-    enum class InlineKind { Bold, Italic, Strikethrough, Link, Image, Heading };
+    enum class InlineKind { Bold, Italic, BoldItalic, Strikethrough, Link, Image, Heading };
 
     struct InlineMarkup {
         InlineKind kind;
