@@ -33,6 +33,7 @@ public:
         DepthRole,
         IsDirectoryRole,
         IsExpandedRole,
+        HasDraftRole,
     };
     Q_ENUM(Role)
 
@@ -73,6 +74,8 @@ public:
     Q_INVOKABLE QUrl urlForPath(const QString &path) const;
     Q_INVOKABLE void setRootUrl(const QUrl &url);
     Q_INVOKABLE void setCurrentUrl(const QUrl &url);
+    // Absolute paths of notes holding text that is not on disk.
+    Q_INVOKABLE void setDraftPaths(const QStringList &paths);
 
     // Reads vault/root and vault/sortMode. Called from main(), never from the
     // constructor: a test that builds a VaultModel must not scan the real vault.
@@ -127,6 +130,7 @@ private:
     QList<Entry> m_entries;
     QList<Node> m_rows;
     QSet<QString> m_collapsedFolders;
+    QSet<QString> m_draftPaths;
     QStringList m_scannedDirectories;
     QFileSystemWatcher m_watcher;
     QTimer m_rescanTimer;

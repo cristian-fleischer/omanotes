@@ -3,6 +3,8 @@
 #include <QObject>
 #include <QPointer>
 #include <QByteArray>
+#include <QHash>
+#include <QStringList>
 #include <QFileSystemWatcher>
 #include <QString>
 #include <QTimer>
@@ -23,6 +25,7 @@ class Backend : public QObject {
     Q_PROPERTY(QString fileName READ fileName NOTIFY fileUrlChanged)
     Q_PROPERTY(bool modified READ modified NOTIFY modifiedChanged)
     Q_PROPERTY(bool untitled READ untitled NOTIFY fileUrlChanged)
+    Q_PROPERTY(QStringList draftPaths READ draftPaths NOTIFY draftsChanged)
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
     Q_PROPERTY(int wordCount READ wordCount NOTIFY wordCountChanged)
     Q_PROPERTY(bool darkMode READ darkMode WRITE setDarkMode NOTIFY darkModeChanged)
@@ -77,7 +80,10 @@ public:
     Q_INVOKABLE void saveAsDialog();
     Q_INVOKABLE void saveAs(const QUrl &url);
     Q_INVOKABLE void fileDialogCanceled();
+    // Every file that has text not on disk, the open one included.
+    QStringList draftPaths() const;
     Q_INVOKABLE void persistDraft();
+    Q_INVOKABLE void discardDraftFor(const QUrl &url);
     Q_INVOKABLE void discardRecovery();
     Q_INVOKABLE void reloadFromDisk();
     Q_INVOKABLE void keepExternalVersion();
@@ -117,6 +123,7 @@ signals:
     void openDialogRequested();
     void saveDialogRequested(const QUrl &suggestedUrl);
     void saveSucceeded();
+    void draftsChanged();
     void externalChangeDetected(bool deleted, bool locallyModified);
 
 private:
@@ -138,6 +145,8 @@ private:
     void applyBlockTypography(QTextCursor &cursor, const QTextBlock &block);
     void scheduleRecovery();
     void writeRecovery();
+    void stashDraft();
+    QString draftKey() const;
     void restoreRecovery();
     void clearRecovery();
     QString recoveryPath() const;
@@ -173,6 +182,9 @@ private:
     bool m_hasKnownFileContents = false;
     LineEnding m_lineEnding = LineEnding::Lf;
     bool m_hasByteOrderMark = false;
+    // Unsaved text per file, so switching notes never asks and never loses
+    // anything. Keyed by file URL; the empty key is the untitled buffer.
+    QHash<QString, QString> m_drafts;
     QString m_recoveryPath;
     std::unique_ptr<QLockFile> m_recoveryLock;
 

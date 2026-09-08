@@ -160,6 +160,8 @@ QVariant VaultModel::data(const QModelIndex &index, int role) const {
         return node.directory;
     case IsExpandedRole:
         return node.directory && !m_collapsedFolders.contains(node.relativePath);
+    case HasDraftRole:
+        return !node.directory && m_draftPaths.contains(node.path);
     default:
         return {};
     }
@@ -173,7 +175,8 @@ QHash<int, QByteArray> VaultModel::roleNames() const {
             {IsCurrentRole, "isCurrent"},
             {DepthRole, "depth"},
             {IsDirectoryRole, "isDirectory"},
-            {IsExpandedRole, "isExpanded"}};
+            {IsExpandedRole, "isExpanded"},
+            {HasDraftRole, "hasDraft"}};
 }
 
 QUrl VaultModel::urlAt(int row) const {
@@ -190,6 +193,20 @@ QUrl VaultModel::urlForPath(const QString &path) const {
 void VaultModel::setRootUrl(const QUrl &url) {
     if (url.isLocalFile())
         setRoot(url.toLocalFile());
+}
+
+void VaultModel::setDraftPaths(const QStringList &paths) {
+    QSet<QString> resolved;
+    for (const QString &path : paths) {
+        const QString canonical = QFileInfo(path).canonicalFilePath();
+        resolved.insert(canonical.isEmpty() ? QDir::cleanPath(path) : canonical);
+    }
+    if (resolved == m_draftPaths)
+        return;
+
+    m_draftPaths = resolved;
+    if (!m_rows.isEmpty())
+        emit dataChanged(index(0), index(int(m_rows.size()) - 1), QList<int>{HasDraftRole});
 }
 
 void VaultModel::setCurrentUrl(const QUrl &url) {

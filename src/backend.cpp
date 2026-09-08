@@ -216,11 +216,48 @@ void Backend::openDialog() {
     emit openDialogRequested();
 }
 
+QString Backend::draftKey() const {
+    return m_fileUrl.isValid() ? m_fileUrl.toString() : QString();
+}
+
+QStringList Backend::draftPaths() const {
+    QStringList paths;
+    for (auto it = m_drafts.constBegin(); it != m_drafts.constEnd(); ++it) {
+        const QUrl url(it.key());
+        if (url.isLocalFile())
+            paths.append(url.toLocalFile());
+    }
+    // The buffer on screen is not in the map until it is left.
+    if (m_modified && m_fileUrl.isLocalFile()) {
+        const QString current = m_fileUrl.toLocalFile();
+        if (!paths.contains(current))
+            paths.append(current);
+    }
+    return paths;
+}
+
+// Leaving a note keeps what was typed in it rather than asking about it.
+void Backend::stashDraft() {
+    if (!m_modified || !m_document)
+        return;
+    m_drafts.insert(draftKey(), currentDocumentText());
+    emit draftsChanged();
+}
+
+void Backend::discardDraftFor(const QUrl &url) {
+    if (m_drafts.remove(url.toString()) > 0) {
+        writeRecovery();
+        emit draftsChanged();
+    }
+}
+
 void Backend::open(const QUrl &url) {
     if (!url.isLocalFile()) {
         setStatus(QStringLiteral("Only local files can be opened."));
         return;
     }
+
+    stashDraft();
 
     const QString targetName = QFileInfo(url.toLocalFile()).fileName();
     QFile file(url.toLocalFile());
@@ -232,14 +269,22 @@ void Backend::open(const QUrl &url) {
     }
 
     const QByteArray contents = file.readAll();
-    loadDocumentText(decodeFileContents(contents, &m_lineEnding, &m_hasByteOrderMark));
-    clearRecovery();
+    const QString onDisk = decodeFileContents(contents, &m_lineEnding, &m_hasByteOrderMark);
+
+    // A note left with unsaved text comes back with it, still unsaved.
+    const auto draft = m_drafts.constFind(url.toString());
+    const bool hadDraft = draft != m_drafts.constEnd();
+    loadDocumentText(hadDraft ? *draft : onDisk);
+
     m_lastKnownFileContents = contents;
     m_hasKnownFileContents = true;
     setFileUrl(url);
     watchCurrentFile();
-    setModified(false);
-    setStatus(QStringLiteral("Opened %1").arg(fileName()));
+    setModified(hadDraft);
+    setStatus(hadDraft ? QStringLiteral("Unsaved changes in %1").arg(fileName())
+                       : QStringLiteral("Opened %1").arg(fileName()));
+    writeRecovery();
+    emit draftsChanged();
 }
 
 void Backend::save() {
@@ -600,7 +645,9 @@ void Backend::saveTo(const QUrl &url) {
                          QFileInfo(url.toLocalFile()).absolutePath());
     setModified(false);
     setStatus(QStringLiteral("Saved %1").arg(fileName()));
-    clearRecovery();
+    m_drafts.remove(url.toString());
+    writeRecovery();
+    emit draftsChanged();
     emit saveSucceeded();
 
     if (shouldClose)
@@ -616,8 +663,10 @@ QString Backend::recoveryPath() const {
 }
 
 void Backend::writeRecovery() {
-    if (!m_modified)
+    if (!m_modified && m_drafts.isEmpty()) {
+        QFile::remove(recoveryPath());
         return;
+    }
     const QString path = recoveryPath();
     if (path.isEmpty())
         return;
@@ -625,9 +674,16 @@ void Backend::writeRecovery() {
     QSaveFile file(path);
     if (!file.open(QIODevice::WriteOnly))
         return;
+    QJsonObject drafts;
+    for (auto it = m_drafts.constBegin(); it != m_drafts.constEnd(); ++it)
+        drafts.insert(it.key(), it.value());
+    if (m_modified)
+        drafts.insert(draftKey(), currentDocumentText());
+
     const QJsonObject recovery{
         {QStringLiteral("fileUrl"), m_fileUrl.toString()},
         {QStringLiteral("text"), currentDocumentText()},
+        {QStringLiteral("drafts"), drafts},
         {QStringLiteral("crlf"), m_lineEnding == LineEnding::CrLf},
         {QStringLiteral("bom"), m_hasByteOrderMark}};
     file.write(QJsonDocument(recovery).toJson(QJsonDocument::Compact));
@@ -642,6 +698,10 @@ void Backend::restoreRecovery() {
     if (!json.isObject() || !json.object().contains(QStringLiteral("text")))
         return;
     const QJsonObject recovery = json.object();
+    const QJsonObject drafts = recovery.value(QStringLiteral("drafts")).toObject();
+    for (auto it = drafts.constBegin(); it != drafts.constEnd(); ++it)
+        m_drafts.insert(it.key(), it.value().toString());
+
     m_lineEnding = recovery.value(QStringLiteral("crlf")).toBool() ? LineEnding::CrLf
                                                                   : LineEnding::Lf;
     m_hasByteOrderMark = recovery.value(QStringLiteral("bom")).toBool();
@@ -658,11 +718,14 @@ void Backend::restoreRecovery() {
     setFileUrl(recoveredUrl);
     setModified(true);
     setStatus(QStringLiteral("Unsaved draft restored"));
+    emit draftsChanged();
 }
 
 void Backend::clearRecovery() {
     m_recoveryTimer.stop();
+    m_drafts.clear();
     QFile::remove(recoveryPath());
+    emit draftsChanged();
 }
 
 void Backend::watchCurrentFile() {

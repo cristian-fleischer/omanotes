@@ -62,6 +62,55 @@ private slots:
         settings.remove(QStringLiteral("window"));
     }
 
+    // Leaving a note with unsaved text used to stop and ask. It keeps the text
+    // under that note instead, and the sidebar marks it.
+    void keepsADraftPerNote() {
+        clearRecoverySnapshots();
+
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        QVERIFY(writeNote(directory.path(), QStringLiteral("first.md")));
+        QVERIFY(writeNote(directory.path(), QStringLiteral("second.md")));
+        const QUrl first = QUrl::fromLocalFile(directory.filePath(QStringLiteral("first.md")));
+        const QUrl second = QUrl::fromLocalFile(directory.filePath(QStringLiteral("second.md")));
+
+        QQmlEngine engine;
+        QScopedPointer<QObject> editor(createEditor(&engine));
+        QVERIFY(editor);
+        Backend backend;
+        backend.attachDocument(editor->property("textDocument").value<QObject *>());
+
+        backend.open(first);
+        QVERIFY(!backend.modified());
+        QVERIFY(QMetaObject::invokeMethod(editor.data(), "insert", Q_ARG(int, 0),
+                                          Q_ARG(QString, QStringLiteral("draft "))));
+        backend.editorTextChanged();
+        QVERIFY(backend.modified());
+        QCOMPARE(backend.draftPaths(), QStringList{first.toLocalFile()});
+
+        // Switching away keeps it, and the second note opens clean.
+        backend.open(second);
+        QVERIFY(!backend.modified());
+        QVERIFY(!editor->property("text").toString().startsWith(QStringLiteral("draft ")));
+        QCOMPARE(backend.draftPaths(), QStringList{first.toLocalFile()});
+
+        // Coming back brings it, still unsaved, with the file untouched.
+        backend.open(first);
+        QVERIFY(backend.modified());
+        QVERIFY(editor->property("text").toString().startsWith(QStringLiteral("draft ")));
+        QFile onDisk(first.toLocalFile());
+        QVERIFY(onDisk.open(QIODevice::ReadOnly));
+        QVERIFY(!onDisk.readAll().startsWith("draft "));
+        onDisk.close();
+
+        // Saving settles it and the mark goes.
+        backend.save();
+        QVERIFY(!backend.modified());
+        QVERIFY(backend.draftPaths().isEmpty());
+
+        clearRecoverySnapshots();
+    }
+
     void keepsUnsavedDraftAcrossRestart() {
         clearRecoverySnapshots();
 

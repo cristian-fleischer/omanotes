@@ -39,15 +39,11 @@ ApplicationWindow {
                           Math.max(360, editorAreaWidth
                                         - Math.round(writerFontMetrics.averageCharacterWidth * 20)))),
         editorAreaWidth)
-    property bool closeConfirmed: false
     property bool searchOpen: false
     property bool searchUpdating: false
     property var searchMatches: []
     property int searchMatchIndex: -1
-    property url pendingOpenUrl
-    property string pendingAction: ""
     property bool replaceOpen: false
-    property bool awaitingPendingSave: false
     property bool sidebarVisible: true
     property int sidebarWidth: 260
     // Ctrl+= and Ctrl+- scale the writing surface only. The chrome keeps
@@ -91,25 +87,10 @@ ApplicationWindow {
         backend.persistDraft();
     }
 
+    // Switching notes never asks. Backend keeps what was typed under the note
+    // it belongs to, and the sidebar marks it with a dot until it is saved.
     function requestOpen(url) {
-        if (!backend.modified) {
-            backend.open(url);
-            return;
-        }
-        pendingOpenUrl = url;
-        pendingAction = "open";
-        unsavedChangesDialog.open();
-    }
-
-    function completePendingAction() {
-        var action = pendingAction;
-        pendingAction = "";
-        if (action === "close") {
-            closeConfirmed = true;
-            close();
-        } else if (action === "open") {
-            backend.open(pendingOpenUrl);
-        }
+        backend.open(url);
     }
 
     FontMetrics {
@@ -418,6 +399,14 @@ ApplicationWindow {
             vault.setCurrentUrl(backend.fileUrl);
         }
 
+        function onDraftsChanged() {
+            vault.setDraftPaths(backend.draftPaths);
+        }
+
+        function onModifiedChanged() {
+            vault.setDraftPaths(backend.draftPaths);
+        }
+
         function onOpenDialogRequested() {
             openFileDialog.open();
         }
@@ -425,17 +414,6 @@ ApplicationWindow {
         function onSaveDialogRequested(suggestedUrl) {
             saveFileDialog.selectedFile = suggestedUrl;
             saveFileDialog.open();
-        }
-
-        function onCloseAfterSave() {
-            win.closeConfirmed = true;
-            win.close();
-        }
-
-        function onSaveSucceeded() {
-            win.awaitingPendingSave = false;
-            if (win.pendingAction !== "")
-                win.completePendingAction();
         }
 
         function onExternalChangeDetected(deleted, locallyModified) {
@@ -459,11 +437,7 @@ ApplicationWindow {
         fileMode: Dialogs.FileDialog.SaveFile
         nameFilters: ["Markdown files (*.md *.markdown)", "All files (*)"]
         onAccepted: backend.saveAs(selectedFile)
-        onRejected: {
-            backend.fileDialogCanceled();
-            win.awaitingPendingSave = false;
-            win.pendingAction = "";
-        }
+        onRejected: backend.fileDialogCanceled()
     }
 
     Dialogs.FontDialog {
@@ -479,29 +453,6 @@ ApplicationWindow {
         id: vaultRootDialog
         title: "Choose the vault folder"
         onAccepted: vault.setRootUrl(selectedFolder)
-    }
-
-    UnsavedChangesDialog {
-        id: unsavedChangesDialog
-        fileName: backend.fileName
-        darkMode: win.darkMode
-        textScale: win.textScale
-        textColor: win.textColor
-        strongTextColor: win.strongTextColor
-        activeButtonColor: backend.themeAccent
-        containerWidth: win.width
-        containerHeight: win.height
-
-        onDiscardRequested: {
-            backend.discardRecovery();
-            win.completePendingAction();
-        }
-
-        onSaveRequested: {
-            win.awaitingPendingSave = true;
-            backend.save();
-        }
-        onCancelRequested: win.pendingAction = ""
     }
 
     ExternalChangeDialog {
@@ -1315,6 +1266,7 @@ ApplicationWindow {
             showMaximized();
 
         vault.setCurrentUrl(backend.fileUrl);
+        vault.setDraftPaths(backend.draftPaths);
 
         var view = backend.viewState();
         win.editorZoom = view.zoom;

@@ -305,7 +305,7 @@ Rectangle {
                         height: width
                         radius: width / 2
                         color: sidebar.accentColor
-                        visible: isCurrent && sidebar.documentModified
+                        visible: hasDraft || (isCurrent && sidebar.documentModified)
                     }
 
                     Column {
