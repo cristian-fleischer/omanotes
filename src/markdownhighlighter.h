@@ -20,6 +20,10 @@ public:
     void setColors(const QString &background, const QString &foreground, const QString &accent);
     void setSearch(const QString &query, int currentMatchStart);
 
+    // The block the caret is in shows its markers as written. Everywhere
+    // else they are hidden and something is drawn in their place.
+    void setActiveBlock(int blockNumber);
+
     // Carried on the block's user state so the next block knows whether it is
     // inside a fence, and so Backend::hiddenRangesAt can tell that a line of
     // code is not a line of Markdown.
@@ -31,7 +35,7 @@ public:
     //   bits 0-7   flag, Normal or InFencedCode
     //   bits 8-15  index into the languages seen in this document
     //   bits 16-23 the code highlighter's own state, for block comments
-    enum BlockState { Normal = 0, InFencedCode = 1 };
+    enum BlockState { Normal = 0, InFencedCode = 1, ThematicBreak = 2 };
 
     static bool isFencedState(int state) {
         return state > 0 && (state & 0xff) == InFencedCode;
@@ -102,7 +106,7 @@ private:
     int highlightCode(const QString &text, int languageIndex, int previousState);
     int languageIndexFor(const QString &language);
     bool highlightTableRow(const QString &text);
-    void highlightMarkers(const QString &text);
+    bool highlightMarkers(const QString &text);
     void highlightSetextContent(const QString &text);
     void highlightInline(const QString &text);
     void highlightSearch(const QString &text);
@@ -136,6 +140,7 @@ private:
     QTextCharFormat m_linkFormat;
     QList<int> m_pendingSetextBlocks;
     QList<int> m_restatedBlocks;
+    int m_activeBlock = -1;
     QString m_searchQuery;
     int m_currentMatchStart = -1;
     QTextCharFormat m_searchFormat;

@@ -606,6 +606,26 @@ QString Backend::resolveFontFamily(const QString &family) {
     return {};
 }
 
+QList<int> Backend::thematicBreakPositions() const {
+    QList<int> positions;
+    if (!m_document)
+        return positions;
+    for (QTextBlock block = m_document->begin(); block.isValid(); block = block.next()) {
+        if (block.userState() == MarkdownHighlighter::ThematicBreak)
+            positions.append(block.position());
+    }
+    return positions;
+}
+
+void Backend::setCursorPosition(int position) {
+    if (!m_document || !m_highlighter)
+        return;
+    const QTextBlock block =
+        m_document->findBlock(qBound(0, position, m_document->characterCount() - 1));
+    if (block.isValid())
+        m_highlighter->setActiveBlock(block.blockNumber());
+}
+
 QVariantMap Backend::viewState() const {
     QSettings settings;
     return {{QStringLiteral("zoom"),

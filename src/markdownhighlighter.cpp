@@ -228,6 +228,20 @@ void MarkdownHighlighter::setColors(const QString &background, const QString &fo
     rehighlight();
 }
 
+void MarkdownHighlighter::setActiveBlock(int blockNumber) {
+    if (m_activeBlock == blockNumber || !document())
+        return;
+
+    const int previous = m_activeBlock;
+    m_activeBlock = blockNumber;
+    // Only the two blocks that changed hands need doing again.
+    for (int number : {previous, blockNumber}) {
+        const QTextBlock block = document()->findBlockByNumber(number);
+        if (block.isValid())
+            rehighlightBlock(block);
+    }
+}
+
 void MarkdownHighlighter::setSearch(const QString &query, int currentMatchStart) {
     if (m_searchQuery == query && m_currentMatchStart == currentMatchStart)
         return;
@@ -434,11 +448,14 @@ void MarkdownHighlighter::highlightBlock(const QString &text) {
         return;
     }
 
+    bool thematicBreak = false;
     if (!text.isEmpty() && !highlightTableRow(text)) {
-        highlightMarkers(text);
+        thematicBreak = highlightMarkers(text);
         highlightSetextContent(text);
         highlightInline(text);
     }
+    if (thematicBreak)
+        applyBlockState(ThematicBreak);
 
     highlightSearch(text);
 }
@@ -555,20 +572,23 @@ void MarkdownHighlighter::highlightSearch(const QString &text) {
     }
 }
 
-void MarkdownHighlighter::highlightMarkers(const QString &text) {
+// Returns true when the line is a thematic break, which the caller records
+// in the block state so QML knows where to draw the rule.
+bool MarkdownHighlighter::highlightMarkers(const QString &text) {
     int first = 0;
     while (first < text.length() && text.at(first).isSpace())
         ++first;
     if (first >= text.length())
-        return;
+        return false;
 
     const QChar firstChar = text.at(first);
+    const bool active = currentBlock().blockNumber() == m_activeBlock;
 
     if (setextUnderlineLevel(text) > 0
             && isParagraphLine(currentBlock().previous().text())) {
         setFormat(0, text.length(), m_markerFormat);
         scheduleSetextRefresh(currentBlock().previous().blockNumber());
-        return;
+        return false;
     }
 
     if (firstChar == QLatin1Char('>')) {
@@ -601,9 +621,16 @@ void MarkdownHighlighter::highlightMarkers(const QString &text) {
             || firstChar == QLatin1Char('_')) {
         static const QRegularExpression ruleRe(QStringLiteral("^\\s{0,3}([-*_])(?:\\s*\\1){2,}\\s*$"));
         const QRegularExpressionMatch rule = ruleRe.match(text);
-        if (rule.hasMatch())
-            setFormat(0, text.length(), m_markerFormat);
+        if (rule.hasMatch()) {
+            // A rule is drawn, not typed: the dashes collapse to nothing and a
+            // line is painted across the page in their place. Put the caret on
+            // the line and they come back so it can be edited.
+            setFormat(0, text.length(), active ? m_markerFormat : m_hiddenMarkerFormat);
+            return true;
+        }
     }
+
+    return false;
 }
 
 // The heading is on this line, the underline that makes it one is on the next.

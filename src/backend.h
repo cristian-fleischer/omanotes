@@ -107,6 +107,10 @@ public:
     // First and last document position of every run of fenced-code lines, so
     // QML can draw one slab behind each of them.
     Q_INVOKABLE QVariantList fencedCodeRegions() const;
+    // Document position of each thematic break, so QML can draw the rule.
+    Q_INVOKABLE QList<int> thematicBreakPositions() const;
+    // The caret's block shows its markers as written.
+    Q_INVOKABLE void setCursorPosition(int position);
     Q_INVOKABLE QVariantMap viewState() const;
     Q_INVOKABLE void saveViewState(qreal zoom, bool fullWidth,
                                    const QString &fontFamily);

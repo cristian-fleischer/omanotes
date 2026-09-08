@@ -57,6 +57,7 @@ ApplicationWindow {
     // One entry per run of fenced-code lines: {y, height} in the editor's
     // coordinates. Recomputed after layout, never during it.
     property var codeSlabs: []
+    property var thematicRules: []
 
     // Component.onDestruction runs after the window is hidden, when visibility
     // reads Hidden and the size is whatever it last grew to. Both have to be
@@ -161,6 +162,14 @@ ApplicationWindow {
             slabs.push({ "y": top.y, "height": bottom.y + bottom.height - top.y });
         }
         win.codeSlabs = slabs;
+
+        var rules = [];
+        var breaks = backend.thematicBreakPositions();
+        for (var r = 0; r < breaks.length; ++r) {
+            var line = editor.positionToRectangle(breaks[r]);
+            rules.push({ "y": Math.round(line.y + line.height / 2) });
+        }
+        win.thematicRules = rules;
     }
 
     function scheduleCodeSlabs() {
@@ -740,6 +749,18 @@ ApplicationWindow {
                     height: editor.height
 
                     Repeater {
+                        model: win.thematicRules
+                        Rectangle {
+                            x: 0
+                            width: codeSlabLayer.width
+                            y: modelData.y
+                            height: Math.max(1, Math.round(win.scaledSize(1)))
+                            color: win.mutedColor
+                            opacity: 0.45
+                        }
+                    }
+
+                    Repeater {
                         model: win.codeSlabs
                         Rectangle {
                             // Padding on all four sides, so the code sits in
@@ -784,6 +805,7 @@ ApplicationWindow {
                         color: win.strongTextColor
                     }
                     onCursorRectangleChanged: editorFlick.ensureCursorVisible()
+                    onCursorPositionChanged: backend.setCursorPosition(cursorPosition)
 
                     // Both handlers take the default DragThreshold policy, a
                     // passive grab, so the caret and selection still work
