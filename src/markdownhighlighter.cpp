@@ -296,12 +296,18 @@ void MarkdownHighlighter::setRevealedRange(int firstBlock, int lastBlock) {
     if (!document())
         return;
 
-    // Only the fence rows change, and there are at most four of them.
-    for (int number : {previousFirst, previousLast, firstBlock, lastBlock}) {
-        const QTextBlock block = document()->findBlockByNumber(number);
-        if (block.isValid())
-            rehighlightBlock(block);
-    }
+    // Every row of a table changes when the range moves, not only its ends the
+    // way a fenced block's rows do, so redo both ranges whole. A range is one
+    // block of code or one table, so this is a handful of lines either way.
+    const auto redo = [this](int from, int to) {
+        for (int number = from; number >= 0 && number <= to; ++number) {
+            const QTextBlock block = document()->findBlockByNumber(number);
+            if (block.isValid())
+                rehighlightBlock(block);
+        }
+    };
+    redo(previousFirst, previousLast);
+    redo(firstBlock, lastBlock);
 }
 
 void MarkdownHighlighter::setSearch(const QString &query, int currentMatchStart) {
@@ -378,6 +384,12 @@ void MarkdownHighlighter::rebuildFormats() {
 
     m_hiddenMarkerFormat.setFontLetterSpacingType(QFont::AbsoluteSpacing);
     m_hiddenMarkerFormat.setFontLetterSpacing(-charWidth);
+
+    // Unlike the hidden format, this one keeps the character's advance: the
+    // asterisk of a list marker still occupies its cell, so the bullet drawn
+    // over it lines up with the dash of the item above.
+    m_invisibleMarkerFormat = QTextCharFormat();
+    m_invisibleMarkerFormat.setForeground(background);
 
     // Six levels. The steps between the middle ones used to be 10 to 15 per
     // cent, which is not enough to tell an H2 from an H4 at a glance, so the
@@ -612,7 +624,9 @@ bool MarkdownHighlighter::highlightTableRow(const QString &text) {
         return false;
 
     const int blockNumber = currentBlock().blockNumber();
-    const bool active = blockNumber == m_activeBlock;
+    // The whole table reads as source while the caret is anywhere in it, not
+    // just on the row it sits on.
+    const bool active = blockNumber >= m_revealedFirst && blockNumber <= m_revealedLast;
     // A pipe only folds away where a rule is drawn through its column.
     const bool gridded = !active && m_griddedRows.contains(blockNumber);
     const QTextCharFormat &pipeFormat = gridded ? m_hiddenMarkerFormat : m_tablePipeFormat;
@@ -679,7 +693,7 @@ bool MarkdownHighlighter::highlightMarkers(const QString &text) {
     if (task.hasMatch()) {
         setFormat(0, int(task.capturedEnd(6)), m_markerFormat);
         if (!active && task.captured(2) == QStringLiteral("*"))
-            setFormat(int(task.capturedStart(2)), 1, m_hiddenMarkerFormat);
+            setFormat(int(task.capturedStart(2)), 1, m_invisibleMarkerFormat);
         const bool done = task.captured(5).compare(QStringLiteral("x"),
                                                    Qt::CaseInsensitive) == 0;
         setFormat(int(task.capturedStart(5)), 1, done ? m_boldFormat : m_markerFormat);
@@ -711,7 +725,7 @@ bool MarkdownHighlighter::highlightMarkers(const QString &text) {
             // An asterisk bullet is drawn as a bullet, so the asterisk itself
             // folds away. A dash or a plus is left as it was written.
             if (!active && list.captured(2) == QStringLiteral("*"))
-                setFormat(int(list.capturedStart(2)), 1, m_hiddenMarkerFormat);
+                setFormat(int(list.capturedStart(2)), 1, m_invisibleMarkerFormat);
 
         }
     }

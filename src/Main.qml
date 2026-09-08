@@ -188,6 +188,8 @@ ApplicationWindow {
                 columns.push(Math.round(
                     editor.positionToRectangle(regions[t].start + regions[t].columns[c]).x));
             }
+            if (regions[t].editing)
+                continue;
             tables.push({
                 "y": head.y,
                 "height": foot.y + foot.height - head.y,

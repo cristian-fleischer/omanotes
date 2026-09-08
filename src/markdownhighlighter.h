@@ -148,6 +148,9 @@ private:
     QStringList m_tableFamilies;
     QTextCharFormat m_markerFormat;
     QTextCharFormat m_hiddenMarkerFormat;
+    // Same metrics as the character it replaces, but painting nothing, so
+    // whatever is drawn in its place lands exactly where it sat.
+    QTextCharFormat m_invisibleMarkerFormat;
     QTextCharFormat m_headingFormats[6];
     QTextCharFormat m_boldFormat;
     QTextCharFormat m_italicFormat;

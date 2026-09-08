@@ -120,6 +120,25 @@ private slots:
                                          .value(QStringLiteral("columns")).toList();
         QCOMPARE(columns.size(), 3);
 
+        // Put the caret back in the table and it goes back to plain source:
+        // nothing drawn over it, wherever in the table the caret sits.
+        backend.setCursorPosition(document->findBlockByNumber(3).position());
+        const QVariantMap editing = backend.tableRegions().constFirst().toMap();
+        QCOMPARE(editing.value(QStringLiteral("editing")).toBool(), true);
+        QVERIFY(editing.value(QStringLiteral("columns")).toList().isEmpty());
+        QCOMPARE(editing.value(QStringLiteral("separator")).toInt(), -1);
+
+        // The pipes come back with it, on every row and not just the caret's.
+        document->setTextWidth(600);
+        (void)document->size();
+        QVERIFY(!qFuzzyCompare(formatAt(*document, 0, 0).fontPointSize(), 1.0));
+        QVERIFY(!qFuzzyCompare(formatAt(*document, 2, 0).fontPointSize(), 1.0));
+
+        // Leaving it again restores the grid.
+        backend.setCursorPosition(document->findBlockByNumber(5).position());
+        QCOMPARE(backend.tableRegions().constFirst().toMap()
+                     .value(QStringLiteral("editing")).toBool(), false);
+
         // One undo puts the table back exactly as it was written.
         QVERIFY(QMetaObject::invokeMethod(editor.data(), "undo"));
         QCOMPARE(document->findBlockByNumber(1).text(), QStringLiteral("|---|---|"));

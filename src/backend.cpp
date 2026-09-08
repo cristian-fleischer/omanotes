@@ -662,14 +662,21 @@ QVariantList Backend::tableRegions() const {
         // Column rules are only drawn through a table whose source lines up in
         // every row. Half a grid, drawn through the one column that happens to
         // agree, reads worse than no grid at all.
+        // A table being edited shows the source it is written in: no rules
+        // drawn over it, nothing folded away.
+        const bool editing = m_revealedFirstBlock >= 0
+            && first.blockNumber() <= m_revealedLastBlock
+            && previous.blockNumber() >= m_revealedFirstBlock;
+
         QVariantList columns;
-        if (aligned) {
+        if (aligned && !editing) {
             for (int column : std::as_const(shared))
                 columns.append(column);
         }
         regions.append(QVariantMap{{QStringLiteral("start"), first.position()},
                                    {QStringLiteral("end"), previous.position()},
-                                   {QStringLiteral("separator"), separator},
+                                   {QStringLiteral("separator"), editing ? -1 : separator},
+                                   {QStringLiteral("editing"), editing},
                                    {QStringLiteral("columns"), columns}});
         first = QTextBlock();
         separator = -1;
@@ -861,35 +868,49 @@ void Backend::setCursorPosition(int position) {
     m_activeBlockNumber = block.blockNumber();
     m_highlighter->setActiveBlock(block.blockNumber());
 
-    // Which fenced run the caret is in, if any. The highlighter sees one block
-    // at a time and cannot pair an opening fence with its closing one.
-    int first = -1;
-    int last = -1;
-    int runStart = -1;
-    int runEnd = -1;
-    for (QTextBlock scan = m_document->begin(); scan.isValid(); scan = scan.next()) {
-        if (isCodeBlock(scan)) {
-            if (runStart < 0)
-                runStart = scan.blockNumber();
-            runEnd = scan.blockNumber();
-            continue;
-        }
-        if (runStart >= 0) {
-            if (block.blockNumber() >= runStart && block.blockNumber() <= runEnd) {
-                first = runStart;
-                last = runEnd;
-                break;
+    // Which run of fenced code or table rows the caret is in, if any. A
+    // QSyntaxHighlighter sees one block at a time and cannot pair an opening
+    // fence with its closing one, or know where a table starts.
+    const auto runContaining = [this, &block](bool code) {
+        int first = -1;
+        int last = -1;
+        int runStart = -1;
+        int runEnd = -1;
+        const auto belongs = [this, code](const QTextBlock &candidate) {
+            return code ? isCodeBlock(candidate)
+                        : candidate.userState() == MarkdownHighlighter::TableRow;
+        };
+        for (QTextBlock scan = m_document->begin(); scan.isValid(); scan = scan.next()) {
+            if (belongs(scan)) {
+                if (runStart < 0)
+                    runStart = scan.blockNumber();
+                runEnd = scan.blockNumber();
+                continue;
             }
-            runStart = -1;
+            if (runStart >= 0) {
+                if (block.blockNumber() >= runStart && block.blockNumber() <= runEnd) {
+                    first = runStart;
+                    last = runEnd;
+                    break;
+                }
+                runStart = -1;
+            }
         }
-    }
-    if (first < 0 && runStart >= 0 && block.blockNumber() >= runStart
-            && block.blockNumber() <= runEnd) {
-        first = runStart;
-        last = runEnd;
-    }
+        if (first < 0 && runStart >= 0 && block.blockNumber() >= runStart
+                && block.blockNumber() <= runEnd) {
+            first = runStart;
+            last = runEnd;
+        }
+        return QPair<int, int>{first, last};
+    };
 
-    m_highlighter->setRevealedRange(first, last);
+    QPair<int, int> revealed = runContaining(true);
+    if (revealed.first < 0)
+        revealed = runContaining(false);
+
+    m_revealedFirstBlock = revealed.first;
+    m_revealedLastBlock = revealed.second;
+    m_highlighter->setRevealedRange(revealed.first, revealed.second);
 }
 
 QVariantMap Backend::viewState() const {

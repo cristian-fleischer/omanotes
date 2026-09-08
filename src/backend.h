@@ -189,6 +189,8 @@ private:
     bool m_formattingTypography = false;
     int m_formattedBlockCount = 0;
     int m_activeBlockNumber = -1;
+    int m_revealedFirstBlock = -1;
+    int m_revealedLastBlock = -1;
     // A table is tidied when the caret leaves it, and only if it was typed
     // in: visiting one must not rewrite it, and opening a file must not
     // touch anything at all.
