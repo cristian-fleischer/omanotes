@@ -620,10 +620,43 @@ QList<int> Backend::thematicBreakPositions() const {
 void Backend::setCursorPosition(int position) {
     if (!m_document || !m_highlighter)
         return;
+
     const QTextBlock block =
         m_document->findBlock(qBound(0, position, m_document->characterCount() - 1));
-    if (block.isValid())
-        m_highlighter->setActiveBlock(block.blockNumber());
+    if (!block.isValid())
+        return;
+
+    m_highlighter->setActiveBlock(block.blockNumber());
+
+    // Which fenced run the caret is in, if any. The highlighter sees one block
+    // at a time and cannot pair an opening fence with its closing one.
+    int first = -1;
+    int last = -1;
+    int runStart = -1;
+    int runEnd = -1;
+    for (QTextBlock scan = m_document->begin(); scan.isValid(); scan = scan.next()) {
+        if (isCodeBlock(scan)) {
+            if (runStart < 0)
+                runStart = scan.blockNumber();
+            runEnd = scan.blockNumber();
+            continue;
+        }
+        if (runStart >= 0) {
+            if (block.blockNumber() >= runStart && block.blockNumber() <= runEnd) {
+                first = runStart;
+                last = runEnd;
+                break;
+            }
+            runStart = -1;
+        }
+    }
+    if (first < 0 && runStart >= 0 && block.blockNumber() >= runStart
+            && block.blockNumber() <= runEnd) {
+        first = runStart;
+        last = runEnd;
+    }
+
+    m_highlighter->setRevealedRange(first, last);
 }
 
 QVariantMap Backend::viewState() const {

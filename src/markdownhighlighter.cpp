@@ -242,6 +242,25 @@ void MarkdownHighlighter::setActiveBlock(int blockNumber) {
     }
 }
 
+void MarkdownHighlighter::setRevealedRange(int firstBlock, int lastBlock) {
+    if (m_revealedFirst == firstBlock && m_revealedLast == lastBlock)
+        return;
+
+    const int previousFirst = m_revealedFirst;
+    const int previousLast = m_revealedLast;
+    m_revealedFirst = firstBlock;
+    m_revealedLast = lastBlock;
+    if (!document())
+        return;
+
+    // Only the fence rows change, and there are at most four of them.
+    for (int number : {previousFirst, previousLast, firstBlock, lastBlock}) {
+        const QTextBlock block = document()->findBlockByNumber(number);
+        if (block.isValid())
+            rehighlightBlock(block);
+    }
+}
+
 void MarkdownHighlighter::setSearch(const QString &query, int currentMatchStart) {
     if (m_searchQuery == query && m_currentMatchStart == currentMatchStart)
         return;
@@ -508,9 +527,15 @@ bool MarkdownHighlighter::highlightFencedCode(const QString &text) {
     // The fence rows and the language tag stay dim; the code between them takes
     // the block format. An empty line inside a fence has no characters to
     // paint, which is why the slab behind it is drawn in QML.
+    const int blockNumber = currentBlock().blockNumber();
+    const bool revealed = blockNumber >= m_revealedFirst && blockNumber <= m_revealedLast;
+    // The fence row is punctuation, not content. It collapses into the slab
+    // unless the caret is somewhere in the block it opens.
+    const QTextCharFormat &fenceFormat = revealed ? m_fenceFormat : m_hiddenMarkerFormat;
+
     if (wasInside && onFenceLine) {
         applyBlockState(Normal);
-        setFormat(0, text.length(), m_fenceFormat);
+        setFormat(0, text.length(), fenceFormat);
         return true;
     }
 
@@ -523,7 +548,7 @@ bool MarkdownHighlighter::highlightFencedCode(const QString &text) {
         static const QRegularExpression infoRe(
             QStringLiteral("^\\s*(?:`{3,}|~{3,})\\s*([A-Za-z0-9_+#.-]*)"));
         languageIndex = languageIndexFor(infoRe.match(text).captured(1));
-        setFormat(0, text.length(), m_fenceFormat);
+        setFormat(0, text.length(), fenceFormat);
     } else {
         languageIndex = (previous >> 8) & 0xff;
         codeState = (previous >> 16) & 0xff;

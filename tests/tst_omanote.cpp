@@ -64,6 +64,66 @@ private slots:
 
     // Leaving a note with unsaved text used to stop and ask. It keeps the text
     // under that note instead, and the sidebar marks it.
+    // Fence rows and thematic breaks are punctuation, not content: they
+    // collapse until the caret is in the block they belong to.
+    void markersRevealWhereTheCaretIs() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("reveal.md"));
+        QFile seed(path);
+        QVERIFY(seed.open(QIODevice::WriteOnly));
+        seed.write("prose\n"
+                   "\n"
+                   "---\n"
+                   "\n"
+                   "```sh\n"
+                   "ls\n"
+                   "```\n"
+                   "after\n");
+        seed.close();
+
+        QQmlEngine engine;
+        QScopedPointer<QObject> editor(createEditor(&engine));
+        QVERIFY(editor);
+        Backend backend;
+        backend.attachDocument(editor->property("textDocument").value<QObject *>());
+        backend.open(QUrl::fromLocalFile(path));
+
+        QTextDocument *document =
+            qobject_cast<QQuickTextDocument *>(
+                editor->property("textDocument").value<QObject *>())->textDocument();
+        QVERIFY(document);
+        const auto blockAt = [document](int line) { return document->findBlockByNumber(line); };
+        const auto layOut = [document]() { document->setTextWidth(600); (void)document->size(); };
+        const auto hidden = [&](int line) {
+            layOut();
+            return qFuzzyCompare(formatAt(*document, line, 0).fontPointSize(), 1.0);
+        };
+
+        // Caret on the first line: everything else is collapsed.
+        backend.setCursorPosition(0);
+        QVERIFY(hidden(2));   // the rule
+        QVERIFY(hidden(4));   // the opening fence
+        QVERIFY(hidden(6));   // the closing fence
+        QCOMPARE(backend.thematicBreakPositions(), QList<int>{blockAt(2).position()});
+
+        // Caret on the rule: its dashes come back, the fence stays collapsed.
+        backend.setCursorPosition(blockAt(2).position());
+        QVERIFY(!hidden(2));
+        QVERIFY(hidden(4));
+
+        // Caret inside the fenced block: both of its rows come back.
+        backend.setCursorPosition(blockAt(5).position());
+        QVERIFY(!hidden(4));
+        QVERIFY(!hidden(6));
+        QVERIFY(hidden(2));
+
+        // And leaving it collapses them again.
+        backend.setCursorPosition(blockAt(7).position());
+        QVERIFY(hidden(4));
+        QVERIFY(hidden(6));
+    }
+
     void findsLinkTargetsAndTaskMarkers() {
         QTemporaryDir directory;
         QVERIFY(directory.isValid());

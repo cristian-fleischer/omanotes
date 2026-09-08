@@ -24,6 +24,10 @@ public:
     // else they are hidden and something is drawn in their place.
     void setActiveBlock(int blockNumber);
 
+    // Blocks of the fenced run the caret is in, whose fence rows show their
+    // backticks. Everywhere else the rows collapse into the slab.
+    void setRevealedRange(int firstBlock, int lastBlock);
+
     // Carried on the block's user state so the next block knows whether it is
     // inside a fence, and so Backend::hiddenRangesAt can tell that a line of
     // code is not a line of Markdown.
@@ -141,6 +145,8 @@ private:
     QList<int> m_pendingSetextBlocks;
     QList<int> m_restatedBlocks;
     int m_activeBlock = -1;
+    int m_revealedFirst = -1;
+    int m_revealedLast = -1;
     QString m_searchQuery;
     int m_currentMatchStart = -1;
     QTextCharFormat m_searchFormat;
