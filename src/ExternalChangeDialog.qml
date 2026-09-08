@@ -18,6 +18,13 @@ Dialog {
     signal reloadRequested()
 
     modal: true
+
+    // Material's default dim washes the page towards light grey, which on a
+    // dark palette reads as the dialog turning the lights on. Dim towards
+    // black in both themes, the way a modal is supposed to.
+    Overlay.modal: Rectangle {
+        color: Qt.rgba(0, 0, 0, 0.55)
+    }
     focus: true
     closePolicy: Popup.CloseOnEscape
     width: Math.min(520, containerWidth - 48)
