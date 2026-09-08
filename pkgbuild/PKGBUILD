@@ -1,4 +1,4 @@
-# Maintainer: Cristian Fleischer <claude@staff.cloud>
+# Maintainer: Cristian Fleischer <cristian.fleischer@gmail.com>
 # Fork of omawrite by David Heinemeier Hansson <david@hey.com>
 
 pkgname=omanote
@@ -6,7 +6,7 @@ pkgver=0.1.0
 pkgrel=1
 pkgdesc='Markdown notes app with a vault sidebar, forked from OmaWrite'
 arch=('x86_64')
-url='https://github.com/omacom/omawrite'
+url='https://github.com/cristian-fleischer/omanote'
 license=('MIT')
 install='omanote.install'
 depends=('qt6-base' 'qt6-declarative' 'xdg-desktop-portal')

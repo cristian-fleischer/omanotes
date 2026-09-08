@@ -9,15 +9,46 @@ never a conversion, and saving writes the bytes you see back unchanged.
 
 Fork of [omawrite](https://github.com/omacom/omawrite) by David Heinemeier
 Hansson, MIT. The editing surface, autosave, atomic writes, crash recovery,
-portal dialogs and theme following all come from there.
+portal dialogs and theme following all come from there. What OmaNote adds is
+the vault sidebar, the inline Markdown styling, syntax highlighting, tables,
+per-note drafts and the typography knobs described below.
+
+- Markdown styled inline over the source: headings, bold, italic, strike,
+  links, rules, bullets, checkboxes, code blocks and tables
+- Syntax highlighting inside fenced blocks, from a statically linked Lexilla
+- A vault sidebar: folder tree, filter, and content search through ripgrep
+- Per-note drafts that survive switching notes, closing the window and a crash
+- Tables padded into alignment on request, never on open
+- Follows the desktop palette, dark mode and text size
+- Zoom, column width, fonts and line heights all in a plain INI file
 
 ## Install
 
+From the release, on Arch and derivatives:
+
 ```sh
-bin/install     # builds, then makepkg -fsi
+curl -LO https://github.com/cristian-fleischer/omanote/releases/download/v0.1.0/omanote-0.1.0-1-x86_64.pkg.tar.zst
+sudo pacman -U omanote-0.1.0-1-x86_64.pkg.tar.zst
 ```
 
-Installs as `omanote`, alongside `omawrite` if you have it.
+From source:
+
+```sh
+sudo pacman -S --needed qt6-base qt6-declarative gcc make
+git clone https://github.com/cristian-fleischer/omanote.git
+cd omanote
+bin/install          # bin/build, then makepkg -fsi
+```
+
+`bin/build` alone leaves the binary in `build/omanote` without packaging, and
+`bin/test` runs the suite offscreen.
+
+It installs as `omanote` and shares nothing with `omawrite`: separate binary,
+desktop file, icon and settings path, so both can be installed side by side.
+
+There is no package for other distributions. `bin/build` needs only `qmake6`,
+`make` and a C++17 compiler, so it works anywhere Qt 6 does; it is developed
+against Qt 6.11.
 
 ## What it renders
 
@@ -144,8 +175,14 @@ there, and the zoom multiplies on top.
 
 ## Requirements
 
-- Qt 6: `qt6-base`, `qt6-declarative` (which ships QtQuick Controls)
-- `xdg-desktop-portal` and a portal backend
+- Qt 6: `qt6-base`, `qt6-declarative` (which ships QtQuick Controls). Arch has
+  no `qt6-quickcontrols2` package; Quick Controls lives inside `qt6-declarative`.
+- `xdg-desktop-portal` and a backend for it, for the file and font pickers
+- `ripgrep`, optional. Without it the sidebar's content search falls back to
+  `grep`.
+
+Nothing else. Lexilla is vendored and linked statically, and the font is
+compiled into the binary.
 
 The iA Writer Mono font is bundled under the SIL Open Font License 1.1; see
 `fonts/OFL.txt`. The font is copyright Information Architects Inc. and based on

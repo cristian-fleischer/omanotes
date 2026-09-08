@@ -1,6 +1,6 @@
 # Escapes and literals
 
-A Windows path: C:\path\to\file and another C:\Users\dizzyc\Notes.
+A Windows path: C:\path\to\file and another C:\Users\Example\Notes.
 
 Arithmetic that is not emphasis: 5 \* 3 = 15, and 2 \* 2 \* 2 = 8.
 
