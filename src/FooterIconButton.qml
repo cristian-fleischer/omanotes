@@ -54,6 +54,17 @@ Item {
                 context.lineTo(4.5, 9.5);
                 context.lineTo(11.5, 9.5);
                 context.lineTo(11.5, 13.5);
+            } else if (control.iconName === "newnote") {
+                context.moveTo(3.5, 2.5);
+                context.lineTo(9, 2.5);
+                context.lineTo(12.5, 6);
+                context.lineTo(12.5, 13.5);
+                context.lineTo(3.5, 13.5);
+                context.closePath();
+                context.moveTo(8, 7.5);
+                context.lineTo(8, 11.5);
+                context.moveTo(6, 9.5);
+                context.lineTo(10, 9.5);
             } else if (control.iconName === "width") {
                 context.moveTo(2.5, 4);
                 context.lineTo(2.5, 12);

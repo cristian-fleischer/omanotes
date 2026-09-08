@@ -494,6 +494,20 @@ private slots:
         QVERIFY(sidebar);
         QVERIFY(list);
         QVERIFY(filterField);
+
+        // The footer actions are icons, drawn by the same button the editor's
+        // own footer uses.
+        QObject *newNoteButton = window->findChild<QObject *>(QStringLiteral("newNoteButton"));
+        QObject *rootButton = window->findChild<QObject *>(QStringLiteral("vaultRootButton"));
+        QVERIFY(newNoteButton);
+        QVERIFY(rootButton);
+        QCOMPARE(newNoteButton->property("iconName").toString(), QStringLiteral("newnote"));
+        QCOMPARE(rootButton->property("iconName").toString(), QStringLiteral("open"));
+        QVERIFY(rootButton->property("tooltip").toString().contains(vaultDirectory.path()));
+
+        QSignalSpy rootChangeSpy(sidebar, SIGNAL(rootChangeRequested()));
+        QVERIFY(QMetaObject::invokeMethod(rootButton, "clicked"));
+        QCOMPARE(rootChangeSpy.count(), 1);
         QCOMPARE(vault.rowCount(), 4);
         QCOMPARE(list->property("count").toInt(), 4);
 

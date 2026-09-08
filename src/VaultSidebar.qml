@@ -392,42 +392,24 @@ Rectangle {
                 anchors.leftMargin: sidebar.scaledSize(10)
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: sidebar.scaledSize(12)
+                opacity: 0.7
 
-                Text {
-                    id: newNoteAction
+                FooterIconButton {
                     objectName: "newNoteButton"
-                    text: "New note"
-                    color: newNoteHover.containsMouse ? sidebar.textColor : sidebar.mutedColor
-                    font.pixelSize: sidebar.scaledSize(11)
-
-                    MouseArea {
-                        id: newNoteHover
-                        anchors.fill: parent
-                        anchors.margins: -sidebar.scaledSize(5)
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: sidebar.newNoteRequested()
-                    }
+                    iconName: "newnote"
+                    iconColor: sidebar.mutedColor
+                    tooltip: "New note (Ctrl+Alt+N)"
+                    onClicked: sidebar.newNoteRequested()
                 }
 
-                Text {
-                    id: rootAction
+                FooterIconButton {
                     objectName: "vaultRootButton"
-                    text: "Folder"
-                    color: rootHover.containsMouse ? sidebar.textColor : sidebar.mutedColor
-                    font.pixelSize: sidebar.scaledSize(11)
-
-                    ToolTip.visible: rootHover.containsMouse
-                    ToolTip.text: sidebar.vaultModel ? sidebar.vaultModel.root : ""
-
-                    MouseArea {
-                        id: rootHover
-                        anchors.fill: parent
-                        anchors.margins: -sidebar.scaledSize(5)
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: sidebar.rootChangeRequested()
-                    }
+                    iconName: "open"
+                    iconColor: sidebar.mutedColor
+                    tooltip: sidebar.vaultModel
+                        ? "Vault folder: " + sidebar.vaultModel.root
+                        : "Vault folder"
+                    onClicked: sidebar.rootChangeRequested()
                 }
             }
 
