@@ -425,6 +425,16 @@ bool Backend::editorTextChanged() {
         // a table row, which wants a different line height at the same count.
         reapplyTypographyToChange();
         m_formattedBlockCount = m_document->blockCount();
+        updateTableGrids();
+
+        // Remember that this table was typed in, so it can be tidied when the
+        // caret leaves it.
+        if (!m_aligningTable) {
+            const QTextBlock caret = m_document->findBlockByNumber(m_activeBlockNumber);
+            const int run = tableRunStart(caret);
+            if (run >= 0)
+                m_editedTableFirstBlock = run;
+        }
     }
 
     scheduleWordCount();
@@ -480,20 +490,16 @@ int Backend::taskMarkerAt(int position) const {
     if (!block.isValid())
         return -1;
 
-    static const QRegularExpression taskRe(
-        QStringLiteral("^\\s*(?:[-+*]|\\d+[.)])\\s+\\[([ xX])\\]"));
-    const QRegularExpressionMatch task = taskRe.match(block.text());
-    if (!task.hasMatch())
+    const int mark = MarkdownHighlighter::taskMarkColumn(block.text());
+    if (mark < 0)
         return -1;
 
     // The whole `[ ]` is the target, so the click does not have to land on the
     // one character between the brackets.
-    const int markerStart = int(task.capturedStart(1)) - 1;
-    const int markerEnd = int(task.capturedEnd(1)) + 1;
     const int inBlock = position - block.position();
-    if (inBlock < markerStart || inBlock > markerEnd)
+    if (inBlock < mark - 1 || inBlock > mark + 1)
         return -1;
-    return block.position() + int(task.capturedStart(1));
+    return block.position() + mark;
 }
 
 QString Backend::linkTargetAt(int position) const {
@@ -622,7 +628,10 @@ QList<int> Backend::asteriskBulletPositions() const {
     if (!m_document)
         return positions;
     for (QTextBlock block = m_document->begin(); block.isValid(); block = block.next()) {
-        if (MarkdownHighlighter::isFencedState(block.userState()))
+        // The line being edited shows the asterisk it was written with, so no
+        // bullet is drawn over it.
+        if (MarkdownHighlighter::isFencedState(block.userState())
+                || block.blockNumber() == m_activeBlockNumber)
             continue;
         const int column = MarkdownHighlighter::asteriskBulletColumn(block.text());
         if (column >= 0)
@@ -645,13 +654,19 @@ QVariantList Backend::tableRegions() const {
     // none in common and keeps the pipes it was written with.
     QList<int> shared;
     bool firstRow = true;
+    bool aligned = true;
 
     const auto flush = [&]() {
         if (!first.isValid())
             return;
+        // Column rules are only drawn through a table whose source lines up in
+        // every row. Half a grid, drawn through the one column that happens to
+        // agree, reads worse than no grid at all.
         QVariantList columns;
-        for (int column : std::as_const(shared))
-            columns.append(column);
+        if (aligned) {
+            for (int column : std::as_const(shared))
+                columns.append(column);
+        }
         regions.append(QVariantMap{{QStringLiteral("start"), first.position()},
                                    {QStringLiteral("end"), previous.position()},
                                    {QStringLiteral("separator"), separator},
@@ -660,6 +675,7 @@ QVariantList Backend::tableRegions() const {
         separator = -1;
         shared.clear();
         firstRow = true;
+        aligned = true;
     };
 
     for (QTextBlock block = m_document->begin(); block.isValid(); block = block.next()) {
@@ -678,13 +694,8 @@ QVariantList Backend::tableRegions() const {
             if (firstRow) {
                 shared = pipes;
                 firstRow = false;
-            } else {
-                QList<int> kept;
-                for (int column : std::as_const(shared)) {
-                    if (pipes.contains(column))
-                        kept.append(column);
-                }
-                shared = kept;
+            } else if (pipes != shared) {
+                aligned = false;
             }
 
             previous = block;
@@ -696,6 +707,129 @@ QVariantList Backend::tableRegions() const {
     return regions;
 }
 
+// Which table rows get a drawn grid, so the highlighter knows whose pipes to
+// fold away. Only Backend can tell: it takes a whole run of rows to decide.
+void Backend::updateTableGrids() {
+    if (!m_document || !m_highlighter)
+        return;
+
+    QSet<int> gridded;
+    const QVariantList regions = tableRegions();
+    for (const QVariant &entry : regions) {
+        const QVariantMap region = entry.toMap();
+        if (region.value(QStringLiteral("columns")).toList().isEmpty())
+            continue;
+        const QTextBlock last = m_document->findBlock(region.value(QStringLiteral("end")).toInt());
+        for (QTextBlock block = m_document->findBlock(region.value(QStringLiteral("start")).toInt());
+                block.isValid(); block = block.next()) {
+            gridded.insert(block.blockNumber());
+            if (block == last)
+                break;
+        }
+    }
+    m_highlighter->setGriddedRows(gridded);
+}
+
+// The block number the caret's table run starts at, or -1.
+int Backend::tableRunStart(const QTextBlock &block) const {
+    if (!block.isValid() || block.userState() != MarkdownHighlighter::TableRow)
+        return -1;
+    QTextBlock first = block;
+    while (first.previous().isValid()
+            && first.previous().userState() == MarkdownHighlighter::TableRow)
+        first = first.previous();
+    return first.blockNumber();
+}
+
+bool Backend::alignTableAt(int position) {
+    if (!m_document)
+        return false;
+
+    const QTextBlock caret =
+        m_document->findBlock(qBound(0, position, m_document->characterCount() - 1));
+    if (!caret.isValid() || caret.userState() != MarkdownHighlighter::TableRow)
+        return false;
+
+    QTextBlock first = caret;
+    while (first.previous().isValid()
+            && first.previous().userState() == MarkdownHighlighter::TableRow)
+        first = first.previous();
+    QTextBlock last = caret;
+    while (last.next().isValid() && last.next().userState() == MarkdownHighlighter::TableRow)
+        last = last.next();
+
+    // Split each row on its pipes. The outer pipes bound the row, so the cells
+    // are what lies between them.
+    QList<QStringList> rows;
+    QList<bool> separators;
+    for (QTextBlock block = first; block.isValid(); block = block.next()) {
+        QStringList cells = block.text().split(QLatin1Char('|'));
+        if (cells.size() >= 2) {
+            cells.removeFirst();
+            cells.removeLast();
+        }
+        for (QString &cell : cells)
+            cell = cell.trimmed();
+        rows.append(cells);
+        separators.append(MarkdownHighlighter::isTableSeparator(block.text()));
+        if (block == last)
+            break;
+    }
+    if (rows.isEmpty())
+        return false;
+
+    int columns = 0;
+    for (const QStringList &row : std::as_const(rows))
+        columns = qMax(columns, int(row.size()));
+
+    QList<int> widths(columns, 3);
+    for (int r = 0; r < rows.size(); ++r) {
+        if (separators.at(r))
+            continue;
+        for (int c = 0; c < rows.at(r).size(); ++c)
+            widths[c] = qMax(widths.at(c), int(rows.at(r).at(c).size()));
+    }
+
+    QStringList aligned;
+    for (int r = 0; r < rows.size(); ++r) {
+        QString line = QStringLiteral("|");
+        for (int c = 0; c < columns; ++c) {
+            const QString cell = c < rows.at(r).size() ? rows.at(r).at(c) : QString();
+            if (separators.at(r)) {
+                // Keep whichever alignment colons the row was written with.
+                const bool left = cell.startsWith(QLatin1Char(':'));
+                const bool right = cell.endsWith(QLatin1Char(':'));
+                // Two wider than the cell, to cover the spaces a data row puts
+                // either side of its content.
+                QString rule(widths.at(c) + 2, QLatin1Char('-'));
+                if (left)
+                    rule[0] = QLatin1Char(':');
+                if (right)
+                    rule[rule.size() - 1] = QLatin1Char(':');
+                line += rule + QLatin1Char('|');
+            } else {
+                line += QLatin1Char(' ') + cell.leftJustified(widths.at(c))
+                      + QStringLiteral(" |");
+            }
+        }
+        aligned.append(line);
+    }
+
+    const QString replacement = aligned.join(QLatin1Char('\n'));
+    if (replacement == m_document->toRawText().mid(
+            first.position(), last.position() + last.length() - 1 - first.position())) {
+        return false;
+    }
+
+    QTextCursor cursor(m_document);
+    cursor.beginEditBlock();
+    cursor.setPosition(first.position());
+    cursor.setPosition(last.position() + last.length() - 1, QTextCursor::KeepAnchor);
+    cursor.insertText(replacement);
+    cursor.endEditBlock();
+    return true;
+}
+
 void Backend::setCursorPosition(int position) {
     if (!m_document || !m_highlighter)
         return;
@@ -705,6 +839,26 @@ void Backend::setCursorPosition(int position) {
     if (!block.isValid())
         return;
 
+    // Leaving a table that was typed in tidies it up, the way an editor
+    // reflows a paragraph when you move on. Never on open, never on a visit.
+    if (m_editedTableFirstBlock >= 0) {
+        const QTextBlock edited = m_document->findBlockByNumber(m_editedTableFirstBlock);
+        const bool stillInside = edited.isValid()
+            && block.userState() == MarkdownHighlighter::TableRow
+            && tableRunStart(block) == m_editedTableFirstBlock;
+        if (!stillInside) {
+            const int firstBlock = m_editedTableFirstBlock;
+            m_editedTableFirstBlock = -1;
+            if (edited.isValid()) {
+                m_aligningTable = true;
+                alignTableAt(edited.position());
+                m_aligningTable = false;
+            }
+            Q_UNUSED(firstBlock)
+        }
+    }
+
+    m_activeBlockNumber = block.blockNumber();
     m_highlighter->setActiveBlock(block.blockNumber());
 
     // Which fenced run the caret is in, if any. The highlighter sees one block
@@ -1215,6 +1369,10 @@ void Backend::applyBlockTypography(QTextCursor &cursor, const QTextBlock &block)
     cursor.mergeBlockFormat(blockFormat);
 }
 
+QString Backend::themeMarker() const {
+    return MarkdownHighlighter::markerColorFor(m_darkMode).name();
+}
+
 QString Backend::themeCodeBackground() const {
     return MarkdownHighlighter::codeBackgroundFor(m_themeBackground, m_darkMode).name();
 }
@@ -1264,6 +1422,7 @@ void Backend::applyDocumentTypography() {
     m_document->setUndoRedoEnabled(undoEnabled);
 
     m_formattedBlockCount = m_document->blockCount();
+    updateTableGrids();
 }
 
 void Backend::reapplyTypographyToChange() {

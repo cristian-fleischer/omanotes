@@ -5,6 +5,7 @@
 
 #include <QColor>
 #include <QHash>
+#include <QSet>
 #include <memory>
 #include <QRegularExpression>
 #include <QSyntaxHighlighter>
@@ -27,6 +28,10 @@ public:
     // Blocks of the fenced run the caret is in, whose fence rows show their
     // backticks. Everywhere else the rows collapse into the slab.
     void setRevealedRange(int firstBlock, int lastBlock);
+
+    // Rows of tables whose columns are drawn as rules. Their pipes fold
+    // away; a table without a grid keeps the pipes it was written with.
+    void setGriddedRows(const QSet<int> &blockNumbers);
 
     // Carried on the block's user state so the next block knows whether it is
     // inside a fence, and so Backend::hiddenRangesAt can tell that a line of
@@ -79,6 +84,10 @@ public:
     // hidden and a bullet is drawn in its place.
     static int asteriskBulletColumn(const QString &text);
 
+    // Where a task's mark sits in the line, or -1. A list marker in front of
+    // the box is optional: `[ ] label` is a task on its own.
+    static int taskMarkColumn(const QString &text);
+
     // The ``` or ~~~ row itself. It belongs to the code slab, not to the
     // prose around it.
     static bool isFenceLine(const QString &text);
@@ -100,6 +109,10 @@ public:
     // slab is drawn behind the editor from QML; inline code uses it as a
     // character background.
     static QColor codeBackgroundFor(const QString &pageBackground, bool darkMode);
+
+    // The colour list markers, pipes and fences are drawn in, so anything
+    // drawn in their place matches them.
+    static QColor markerColorFor(bool darkMode);
 
     // Block numbers whose fence state changed in the last pass, and clears the
     // list. Opening a fence restates every line under it, and nothing else can
@@ -154,6 +167,7 @@ private:
     QList<int> m_pendingSetextBlocks;
     QList<int> m_restatedBlocks;
     int m_activeBlock = -1;
+    QSet<int> m_griddedRows;
     int m_revealedFirst = -1;
     int m_revealedLast = -1;
     QString m_searchQuery;

@@ -10,7 +10,9 @@ SOURCES += \
     $$LEXILLA/lexers/LexBash.cxx \
     $$LEXILLA/lexers/LexJSON.cxx \
     $$LEXILLA/lexers/LexPython.cxx \
-    $$LEXILLA/lexers/LexSQL.cxx
+    $$LEXILLA/lexers/LexSQL.cxx \
+    $$LEXILLA/lexers/LexYAML.cxx \
+    $$LEXILLA/lexers/LexProps.cxx
 
 # Third-party source: do not hold it to this project's warning settings.
 QMAKE_CXXFLAGS += -Wno-deprecated-declarations

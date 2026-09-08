@@ -313,6 +313,12 @@ ApplicationWindow {
     }
 
     Shortcut {
+        sequence: "Ctrl+Shift+T"
+        context: Qt.ApplicationShortcut
+        onActivated: backend.alignTableAt(editor.cursorPosition)
+    }
+
+    Shortcut {
         sequence: "Ctrl+M"
         context: Qt.ApplicationShortcut
         onActivated: win.toggleFullWidth()
@@ -525,7 +531,7 @@ ApplicationWindow {
             spacing: 12
 
             Label {
-                text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+Alt+N  New Note in the Vault\nCtrl+L  Toggle Sidebar\nCtrl+Shift+L  Focus the Note Filter\nCtrl+= / Ctrl+-  Zoom the Text\nCtrl+0  Reset the Zoom\nCtrl+M  Full Window Width\nCtrl+Shift+F  Editor Font\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
+                text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+Alt+N  New Note in the Vault\nCtrl+L  Toggle Sidebar\nCtrl+Shift+L  Focus the Note Filter\nCtrl+= / Ctrl+-  Zoom the Text\nCtrl+0  Reset the Zoom\nCtrl+M  Full Window Width\nCtrl+Shift+T  Align the Table\nCtrl+Shift+F  Editor Font\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
                 lineHeight: 1.5
             }
 
@@ -779,18 +785,22 @@ ApplicationWindow {
                     width: editor.width
                     height: editor.height
 
+                    // A drawn dot rather than a bullet glyph: it lands in the
+                    // cell the asterisk occupied, in the colour the other list
+                    // markers use, at a size that does not depend on whether
+                    // the chosen font has a good U+2022.
                     Repeater {
                         model: win.bullets
-                        Text {
+                        Rectangle {
+                            readonly property real dot:
+                                Math.max(2, Math.round(win.editorFontPixelSize * 0.26))
+                            width: dot
+                            height: dot
+                            radius: dot / 2
+                            color: backend.themeMarker
                             x: modelData.x
-                            y: modelData.y
-                            height: modelData.height
-                            width: writerFontMetrics.averageCharacterWidth
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                            text: "\u2022"
-                            color: win.mutedColor
-                            font.pixelSize: win.editorFontPixelSize
+                                + Math.round((writerFontMetrics.advanceWidth("*") - dot) / 2)
+                            y: modelData.y + Math.round((modelData.height - dot) / 2)
                         }
                     }
 

@@ -35,6 +35,15 @@ const QRegularExpression &listRe() {
     return re;
 }
 
+// A checkbox, with or without a list marker in front of it: `- [ ] x` and
+// `[ ] x` are both tasks.
+//   1 indent, 2 list marker, 3 its space, 4 `[`, 5 the mark, 6 `]` and space
+const QRegularExpression &taskRe() {
+    static const QRegularExpression re(QStringLiteral(
+        "^(\\s*)(?:([-+*]|\\d+[.)])(\\s+))?(\\[)([ xX])(\\]\\s?)"));
+    return re;
+}
+
 bool isFenceLine(const QString &line) {
     return fenceRe().match(line).hasMatch();
 }
@@ -150,6 +159,11 @@ bool MarkdownHighlighter::isTableRow(const QString &text) {
     return ::isTableRow(text);
 }
 
+int MarkdownHighlighter::taskMarkColumn(const QString &text) {
+    const QRegularExpressionMatch task = taskRe().match(text);
+    return task.hasMatch() ? int(task.capturedStart(5)) : -1;
+}
+
 int MarkdownHighlighter::asteriskBulletColumn(const QString &text) {
     const QRegularExpressionMatch list = listRe().match(text);
     if (!list.hasMatch() || list.captured(2) != QStringLiteral("*"))
@@ -175,6 +189,10 @@ void MarkdownHighlighter::setCodeFontFamily(const QString &family) {
     m_codeFontFamily = family;
     rebuildFormats();
     rehighlight();
+}
+
+QColor MarkdownHighlighter::markerColorFor(bool darkMode) {
+    return darkMode ? QColor(QStringLiteral("#4f525a")) : QColor(QStringLiteral("#aeb1b5"));
 }
 
 QColor MarkdownHighlighter::codeBackgroundFor(const QString &pageBackground, bool darkMode) {
@@ -254,6 +272,19 @@ void MarkdownHighlighter::setActiveBlock(int blockNumber) {
     }
 }
 
+void MarkdownHighlighter::setGriddedRows(const QSet<int> &blockNumbers) {
+    if (m_griddedRows == blockNumbers || !document())
+        return;
+
+    const QSet<int> changed = (m_griddedRows | blockNumbers) - (m_griddedRows & blockNumbers);
+    m_griddedRows = blockNumbers;
+    for (int number : changed) {
+        const QTextBlock block = document()->findBlockByNumber(number);
+        if (block.isValid())
+            rehighlightBlock(block);
+    }
+}
+
 void MarkdownHighlighter::setRevealedRange(int firstBlock, int lastBlock) {
     if (m_revealedFirst == firstBlock && m_revealedLast == lastBlock)
         return;
@@ -282,8 +313,7 @@ void MarkdownHighlighter::setSearch(const QString &query, int currentMatchStart)
 }
 
 void MarkdownHighlighter::rebuildFormats() {
-    const QColor marker = m_darkMode ? QColor(QStringLiteral("#4f525a"))
-                                     : QColor(QStringLiteral("#aeb1b5"));
+    const QColor marker = markerColorFor(m_darkMode);
     const QColor background = !m_customBackground.isEmpty() ? QColor(m_customBackground)
         : (m_darkMode ? QColor(QStringLiteral("#101010")) : QColor(QStringLiteral("#ffffff")));
     const QColor text = !m_customForeground.isEmpty() ? QColor(m_customForeground)
@@ -581,7 +611,11 @@ bool MarkdownHighlighter::highlightTableRow(const QString &text) {
     if (!isTableRow(text))
         return false;
 
-    const bool active = currentBlock().blockNumber() == m_activeBlock;
+    const int blockNumber = currentBlock().blockNumber();
+    const bool active = blockNumber == m_activeBlock;
+    // A pipe only folds away where a rule is drawn through its column.
+    const bool gridded = !active && m_griddedRows.contains(blockNumber);
+    const QTextCharFormat &pipeFormat = gridded ? m_hiddenMarkerFormat : m_tablePipeFormat;
 
     // The separator is scaffolding: it collapses and a rule is drawn where it
     // was, unless the caret is on it.
@@ -595,7 +629,7 @@ bool MarkdownHighlighter::highlightTableRow(const QString &text) {
         setFormat(0, text.length(), m_tableHeaderFormat);
         for (int i = 0; i < text.length(); ++i) {
             if (text.at(i) == QLatin1Char('|'))
-                setFormat(i, 1, m_tablePipeFormat);
+                setFormat(i, 1, pipeFormat);
         }
         return true;
     }
@@ -607,7 +641,7 @@ bool MarkdownHighlighter::highlightTableRow(const QString &text) {
     setFormat(0, text.length(), m_tableFormat);
     for (int i = 0; i < text.length(); ++i) {
         if (text.at(i) == QLatin1Char('|'))
-            setFormat(i, 1, m_tablePipeFormat);
+            setFormat(i, 1, pipeFormat);
     }
     return true;
 }
@@ -640,6 +674,18 @@ bool MarkdownHighlighter::highlightMarkers(const QString &text) {
     const QChar firstChar = text.at(first);
     const bool active = currentBlock().blockNumber() == m_activeBlock;
 
+    // A checkbox does not need a list marker: `[ ] label` is a task too.
+    const QRegularExpressionMatch task = taskRe().match(text);
+    if (task.hasMatch()) {
+        setFormat(0, int(task.capturedEnd(6)), m_markerFormat);
+        if (!active && task.captured(2) == QStringLiteral("*"))
+            setFormat(int(task.capturedStart(2)), 1, m_hiddenMarkerFormat);
+        const bool done = task.captured(5).compare(QStringLiteral("x"),
+                                                   Qt::CaseInsensitive) == 0;
+        setFormat(int(task.capturedStart(5)), 1, done ? m_boldFormat : m_markerFormat);
+        return false;
+    }
+
     if (setextUnderlineLevel(text) > 0
             && isParagraphLine(currentBlock().previous().text())) {
         setFormat(0, text.length(), m_markerFormat);
@@ -667,15 +713,6 @@ bool MarkdownHighlighter::highlightMarkers(const QString &text) {
             if (!active && list.captured(2) == QStringLiteral("*"))
                 setFormat(int(list.capturedStart(2)), 1, m_hiddenMarkerFormat);
 
-            // `- [ ]` and `- [x]`: brackets dim like the bullet, the mark bold
-            // so a finished item reads at a glance.
-            if (list.capturedStart(4) >= 0) {
-                const bool done = list.captured(5).compare(QStringLiteral("x"),
-                                                           Qt::CaseInsensitive) == 0;
-                setFormat(list.capturedStart(4), 1, m_markerFormat);
-                setFormat(list.capturedStart(5), 1, done ? m_boldFormat : m_markerFormat);
-                setFormat(list.capturedStart(6), list.capturedLength(6), m_markerFormat);
-            }
         }
     }
 

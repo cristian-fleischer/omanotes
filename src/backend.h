@@ -35,6 +35,7 @@ class Backend : public QObject {
     Q_PROPERTY(QString themeAccent READ themeAccent NOTIFY themeColorsChanged)
     Q_PROPERTY(QString themeSelection READ themeSelection NOTIFY themeColorsChanged)
     Q_PROPERTY(QString themeCodeBackground READ themeCodeBackground NOTIFY themeColorsChanged)
+    Q_PROPERTY(QString themeMarker READ themeMarker NOTIFY themeColorsChanged)
 
 public:
     // How the open file separates its lines, and whether it starts with a UTF-8
@@ -64,6 +65,7 @@ public:
     QString themeAccent() const { return m_themeAccent; }
     QString themeSelection() const { return m_themeSelection; }
     QString themeCodeBackground() const;
+    QString themeMarker() const;
     static int countWords(const QString &text);
     static QString decodeFileContents(const QByteArray &bytes, LineEnding *lineEnding,
                                       bool *hasByteOrderMark);
@@ -114,6 +116,11 @@ public:
     Q_INVOKABLE QVariantList tableRegions() const;
     // Document position of each hidden `*` list marker.
     Q_INVOKABLE QList<int> asteriskBulletPositions() const;
+    // Pad the table under the caret so its columns line up. An explicit
+    // edit, undoable, and the only thing here that rewrites the buffer.
+    Q_INVOKABLE bool alignTableAt(int position);
+    // For tests: the grid set is normally refreshed by an edit.
+    void updateTableGridsForTest() { updateTableGrids(); }
     // The caret's block shows its markers as written.
     Q_INVOKABLE void setCursorPosition(int position);
     Q_INVOKABLE QVariantMap viewState() const;
@@ -153,6 +160,8 @@ private:
     void refreshWordCount();
     void scheduleWordCount();
     void applyDocumentTypography();
+    void updateTableGrids();
+    int tableRunStart(const QTextBlock &block) const;
     void reapplyTypographyToChange();
     bool isCodeBlock(const QTextBlock &block) const;
     qreal lineHeightForBlock(const QTextBlock &block) const;
@@ -179,6 +188,12 @@ private:
     bool m_closeAfterSave = false;
     bool m_formattingTypography = false;
     int m_formattedBlockCount = 0;
+    int m_activeBlockNumber = -1;
+    // A table is tidied when the caret leaves it, and only if it was typed
+    // in: visiting one must not rewrite it, and opening a file must not
+    // touch anything at all.
+    int m_editedTableFirstBlock = -1;
+    bool m_aligningTable = false;
     // Percentages of the line's own font size, from settings.
     qreal m_lineHeight = 140;
     qreal m_codeLineHeight = 125;

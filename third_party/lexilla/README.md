@@ -20,6 +20,8 @@ more `lexers/Lex*.cxx` here, listing it in `lexilla.pri`, and mapping it in
 | `LexJSON.cxx` | JSON |
 | `LexPython.cxx` | Python |
 | `LexSQL.cxx` | SQL |
+| `LexYAML.cxx` | YAML |
+| `LexProps.cxx` | .env, ini, conf, properties, toml |
 
 Licence: see `LICENSE`. Copyright 1998-2021 Neil Hodgson.
 

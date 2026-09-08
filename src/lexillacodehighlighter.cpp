@@ -13,7 +13,8 @@ namespace {
 
 // Which SCE_* numbering a lexer speaks. The numbers overlap between lexers, so
 // the mapping to tokens has to know which family it is reading.
-enum Family { FamilyCpp, FamilyPhp, FamilyBash, FamilyPython, FamilySql, FamilyJson };
+enum Family { FamilyCpp, FamilyPhp, FamilyBash, FamilyPython, FamilySql, FamilyJson,
+              FamilyYaml, FamilyProps };
 
 struct Language {
     const char *name;
@@ -88,6 +89,16 @@ const Language languages[] = {
     {"python", "python", FamilyPython, 0, pythonKeywords},
     {"py", "python", FamilyPython, 0, pythonKeywords},
     {"sql", "sql", FamilySql, 0, sqlKeywords},
+    {"yaml", "yaml", FamilyYaml, 0, "true false null yes no on off"},
+    {"yml", "yaml", FamilyYaml, 0, "true false null yes no on off"},
+    // A .env file is a properties file: KEY=value with # comments. So are the
+    // ini and conf files that turn up in notes next to them.
+    {"env", "props", FamilyProps, 0, ""},
+    {"dotenv", "props", FamilyProps, 0, ""},
+    {"ini", "props", FamilyProps, 0, ""},
+    {"conf", "props", FamilyProps, 0, ""},
+    {"properties", "props", FamilyProps, 0, ""},
+    {"toml", "props", FamilyProps, 0, ""},
 };
 
 using Token = CodeSyntaxHighlighter::Token;
@@ -241,6 +252,46 @@ Token tokenForJson(int style) {
     }
 }
 
+Token tokenForYaml(int style) {
+    switch (style) {
+    case SCE_YAML_COMMENT:
+        return Token::Comment;
+    case SCE_YAML_NUMBER:
+        return Token::Number;
+    case SCE_YAML_KEYWORD:
+        return Token::Keyword;
+    case SCE_YAML_IDENTIFIER:
+        return Token::Attribute;
+    case SCE_YAML_REFERENCE: case SCE_YAML_DOCUMENT:
+        return Token::Preprocessor;
+    case SCE_YAML_TEXT:
+        return Token::String;
+    case SCE_YAML_OPERATOR:
+        return Token::Operator;
+    case SCE_YAML_ERROR:
+        return Token::Error;
+    default:
+        return Token::Default;
+    }
+}
+
+Token tokenForProps(int style) {
+    switch (style) {
+    case SCE_PROPS_COMMENT:
+        return Token::Comment;
+    case SCE_PROPS_SECTION:
+        return Token::Keyword;
+    case SCE_PROPS_KEY:
+        return Token::Attribute;
+    case SCE_PROPS_ASSIGNMENT:
+        return Token::Operator;
+    case SCE_PROPS_DEFVAL:
+        return Token::String;
+    default:
+        return Token::Default;
+    }
+}
+
 Token tokenFor(int family, int style) {
     switch (family) {
     case FamilyCpp: return tokenForCpp(style);
@@ -249,6 +300,8 @@ Token tokenFor(int family, int style) {
     case FamilyPython: return tokenForPython(style);
     case FamilySql: return tokenForSql(style);
     case FamilyJson: return tokenForJson(style);
+    case FamilyYaml: return tokenForYaml(style);
+    case FamilyProps: return tokenForProps(style);
     default: return Token::Default;
     }
 }
@@ -359,6 +412,8 @@ extern const Lexilla::LexerModule lmBash;
 extern const Lexilla::LexerModule lmJSON;
 extern const Lexilla::LexerModule lmPython;
 extern const Lexilla::LexerModule lmSQL;
+extern const Lexilla::LexerModule lmYAML;
+extern const Lexilla::LexerModule lmProps;
 
 namespace {
 
@@ -370,6 +425,8 @@ const Lexilla::LexerModule *moduleNamed(const char *name) {
     if (wanted == QLatin1String("json")) return &lmJSON;
     if (wanted == QLatin1String("python")) return &lmPython;
     if (wanted == QLatin1String("sql")) return &lmSQL;
+    if (wanted == QLatin1String("yaml")) return &lmYAML;
+    if (wanted == QLatin1String("props")) return &lmProps;
     return nullptr;
 }
 

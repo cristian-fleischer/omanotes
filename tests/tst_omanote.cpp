@@ -66,6 +66,65 @@ private slots:
     // under that note instead, and the sidebar marks it.
     // Fence rows and thematic breaks are punctuation, not content: they
     // collapse until the caret is in the block they belong to.
+    void alignsATableThatWasTypedIn() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("table.md"));
+        QFile seed(path);
+        QVERIFY(seed.open(QIODevice::WriteOnly));
+        seed.write("| Month | Savings |\n"
+                   "|---|---|\n"
+                   "| January | $250 |\n"
+                   "| February | $80 |\n"
+                   "\n"
+                   "after\n");
+        seed.close();
+
+        QQmlEngine engine;
+        QScopedPointer<QObject> editor(createEditor(&engine));
+        QVERIFY(editor);
+        Backend backend;
+        backend.attachDocument(editor->property("textDocument").value<QObject *>());
+        backend.open(QUrl::fromLocalFile(path));
+
+        QTextDocument *document =
+            qobject_cast<QQuickTextDocument *>(
+                editor->property("textDocument").value<QObject *>())->textDocument();
+        QVERIFY(document);
+
+        // Opening a file changes nothing, whatever its tables look like.
+        QVERIFY(!backend.modified());
+        QCOMPARE(document->findBlockByNumber(2).text(), QStringLiteral("| January | $250 |"));
+
+        // Ragged source gets no column rules: half a grid reads worse than none.
+        QVERIFY(backend.tableRegions().constFirst().toMap()
+                    .value(QStringLiteral("columns")).toList().isEmpty());
+
+        // Typing in it and moving away tidies it.
+        backend.setCursorPosition(document->findBlockByNumber(2).position());
+        QVERIFY(QMetaObject::invokeMethod(
+            editor.data(), "insert",
+            Q_ARG(int, document->findBlockByNumber(2).position() + 2),
+            Q_ARG(QString, QStringLiteral("x"))));
+        backend.editorTextChanged();
+        backend.setCursorPosition(document->findBlockByNumber(5).position());
+
+        const QString header = document->findBlockByNumber(0).text();
+        for (int line = 1; line <= 3; ++line)
+            QCOMPARE(document->findBlockByNumber(line).text().size(), header.size());
+        QVERIFY(header.startsWith(QStringLiteral("| Month ")));
+
+        // Now every row has its pipes in the same columns, so the grid is drawn.
+        backend.updateTableGridsForTest();
+        const QVariantList columns = backend.tableRegions().constFirst().toMap()
+                                         .value(QStringLiteral("columns")).toList();
+        QCOMPARE(columns.size(), 3);
+
+        // One undo puts the table back exactly as it was written.
+        QVERIFY(QMetaObject::invokeMethod(editor.data(), "undo"));
+        QCOMPARE(document->findBlockByNumber(1).text(), QStringLiteral("|---|---|"));
+    }
+
     void tableRegionsShareOnlyAlignedColumns() {
         QTemporaryDir directory;
         QVERIFY(directory.isValid());
