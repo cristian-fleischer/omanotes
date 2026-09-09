@@ -199,25 +199,36 @@ QColor MarkdownHighlighter::markerColorFor(bool darkMode) {
     return darkMode ? QColor(QStringLiteral("#4f525a")) : QColor(QStringLiteral("#aeb1b5"));
 }
 
-QColor MarkdownHighlighter::codeBackgroundFor(const QString &pageBackground, bool darkMode) {
+// Shared by both: hue and saturation of the page, lightness moved by a step.
+static QColor pageShade(const QString &pageBackground, bool darkMode, qreal step) {
     QColor base(pageBackground);
     if (!base.isValid()) {
         base = darkMode ? QColor(QStringLiteral("#101010"))
                         : QColor(QStringLiteral("#ffffff"));
     }
-
     const QColor hsl = base.toHsl();
     const qreal lightness = hsl.lightnessF();
-    // Darker than the page, which reads as an inset slab. On a page that is
-    // already almost black there is nothing darker left to show, so step up
-    // instead.
-    constexpr qreal step = 0.04;
-    const qreal wanted = lightness > step ? lightness - step : lightness + step;
-
+    const qreal wanted = step < 0
+        ? (lightness > -step ? lightness + step : lightness - step)
+        : (lightness + step <= 1.0 ? lightness + step : lightness - step);
     // hueF() is -1 for a grey; fromHslF rejects that.
     const qreal hue = hsl.hueF() < 0 ? 0.0 : hsl.hueF();
     const qreal saturation = hsl.hueF() < 0 ? 0.0 : hsl.saturationF();
     return QColor::fromHslF(hue, saturation, qBound(0.0, wanted, 1.0));
+}
+
+QColor MarkdownHighlighter::inlineCodeBackgroundFor(const QString &pageBackground,
+                                                    bool darkMode) {
+    // Brighter than the page, so a span reads as a chip laid on the text. The
+    // block slab goes the other way, as a panel let into the page.
+    return pageShade(pageBackground, darkMode, 0.09);
+}
+
+QColor MarkdownHighlighter::codeBackgroundFor(const QString &pageBackground, bool darkMode) {
+    // Darker than the page, which reads as a panel let into it. On a page that
+    // is already almost black there is nothing darker left to show, so
+    // pageShade steps the other way.
+    return pageShade(pageBackground, darkMode, -0.04);
 }
 
 QList<int> MarkdownHighlighter::takeRestatedBlocks() {
@@ -331,7 +342,8 @@ void MarkdownHighlighter::rebuildFormats() {
     const QColor link = !m_customAccent.isEmpty() ? QColor(m_customAccent)
         : (m_darkMode ? QColor(QStringLiteral("#5584aa")) : QColor(QStringLiteral("#2077b2")));
     const QColor quote = marker;
-    const QColor codeBackground = codeBackgroundFor(m_customBackground, m_darkMode);
+    const QColor inlineCodeBackground =
+        inlineCodeBackgroundFor(m_customBackground, m_darkMode);
 
     m_formatFont = document() ? document()->defaultFont() : QFont();
 
@@ -439,7 +451,7 @@ void MarkdownHighlighter::rebuildFormats() {
 
     m_codeFormat = QTextCharFormat();
     m_codeFormat.setForeground(text);
-    m_codeFormat.setBackground(codeBackground);
+    m_codeFormat.setBackground(inlineCodeBackground);
     m_codeFormat.setFontFamilies(m_codeFamilies);
 
     m_codeBlockFormat = QTextCharFormat();
@@ -798,21 +810,6 @@ void MarkdownHighlighter::highlightInline(const QString &text) {
         }
     }
 
-    if (text.contains(QLatin1Char('`'))) {
-        static const QRegularExpression codeRe(QStringLiteral("`([^`]+)`"));
-        QRegularExpressionMatchIterator codeMatches = codeRe.globalMatch(text);
-        while (codeMatches.hasNext()) {
-            const QRegularExpressionMatch match = codeMatches.next();
-            const int start = int(match.capturedStart(0));
-            // Merge, so code in a heading keeps the heading's size.
-            QTextCharFormat merged = format(start);
-            merged.setFontFamilies(m_codeFormat.fontFamilies().toStringList());
-            merged.setForeground(m_codeFormat.foreground());
-            merged.setBackground(m_codeFormat.background());
-            setFormat(start, int(match.capturedLength(0)), merged);
-        }
-    }
-
     for (const InlineMarkup &item : markup) {
         if (item.kind == InlineKind::Heading) {
             // Already applied above.
@@ -843,14 +840,31 @@ void MarkdownHighlighter::highlightInline(const QString &text) {
                 merged.setFontUnderline(true);
                 merged.setForeground(m_linkFormat.foreground());
                 break;
+            case InlineKind::Code:
+                merged.setFontFamilies(m_codeFormat.fontFamilies().toStringList());
+                merged.setForeground(m_codeFormat.foreground());
+                merged.setBackground(m_codeFormat.background());
+                break;
             case InlineKind::Heading:
                 break;
             }
             setFormat(item.content.start, item.content.length, merged);
         }
 
-        for (const Span &marker : item.markers)
-            setFormat(marker.start, marker.length, m_hiddenMarkerFormat);
+        for (const Span &marker : item.markers) {
+            if (item.kind != InlineKind::Code) {
+                setFormat(marker.start, marker.length, m_hiddenMarkerFormat);
+                continue;
+            }
+            // A backtick keeps its cell and paints nothing, so what is left is
+            // a space of chip either side of the code. Collapsing it instead
+            // would leave the chip clamped to the text and reflow the line
+            // every time the caret passed through.
+            QTextCharFormat padding = format(marker.start);
+            padding.setForeground(QColor(Qt::transparent));
+            padding.setBackground(m_codeFormat.background());
+            setFormat(marker.start, marker.length, padding);
+        }
     }
 }
 
@@ -864,7 +878,7 @@ MarkdownHighlighter::inlineMarkup(const QString &text, bool insideFencedCode) {
 
     if (!text.contains(QLatin1Char('*')) && !text.contains(QLatin1Char('_'))
             && !text.contains(QLatin1Char('[')) && !text.contains(QLatin1Char('~'))
-            && !text.startsWith(QLatin1Char('#'))) {
+            && !text.contains(QLatin1Char('`')) && !text.startsWith(QLatin1Char('#'))) {
         return markup;
     }
 
@@ -900,6 +914,11 @@ MarkdownHighlighter::inlineMarkup(const QString &text, bool insideFencedCode) {
         markup.append({InlineKind::Heading, span(heading, 3),
                        {{0, markerLength}, {int(text.length()), 0}},
                        int(heading.capturedLength(1))});
+    }
+
+    for (const Span &span : std::as_const(code)) {
+        markup.append({InlineKind::Code, {span.start + 1, span.length - 2},
+                       {{span.start, 1}, {span.start + span.length - 1, 1}}});
     }
 
     // `***both***` first, and its span is then off limits to the bold and

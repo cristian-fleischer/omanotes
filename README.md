@@ -70,6 +70,7 @@ The buffer is always your Markdown. These are drawn over it, never in it.
 | `# ` to `###### ` | Six heading sizes, 1.9x down to 1.0x, the deeper ones fading. Markers hidden. |
 | `**b**`, `*i*`, `***bi***`, `~~s~~` | Bold, italic, both, struck through. Markers hidden. |
 | `[text](url)`, `![alt](src)` | The text, underlined in the accent colour. Ctrl+click opens it. |
+| `` `code` `` | A chip a step brighter than the page, the backticks holding a space of it either side rather than showing. |
 | ` ```lang ` | A slab behind the code, syntax highlighted, the fence rows folded away. |
 | `---` | A rule across the page. |
 | `* item` | A bullet drawn in the asterisk's own cell. `-` and `+` are left alone. |

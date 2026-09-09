@@ -2065,11 +2065,18 @@ private slots:
                 found.append(int(item.kind));
             return found;
         };
+        // A code span is markup of its own, and nothing else may claim any
+        // part of one.
         QCOMPARE(kinds(QStringLiteral("### `contact_id` and `test_id`")),
-                 QList<int>{int(MarkdownHighlighter::InlineKind::Heading)});
-        QVERIFY(kinds(QStringLiteral("`a *b* c`")).isEmpty());
-        QVERIFY(kinds(QStringLiteral("`[a](b)`")).isEmpty());
-        QVERIFY(kinds(QStringLiteral("`a ~~b~~ c`")).isEmpty());
+                 (QList<int>{int(MarkdownHighlighter::InlineKind::Heading),
+                             int(MarkdownHighlighter::InlineKind::Code),
+                             int(MarkdownHighlighter::InlineKind::Code)}));
+        QCOMPARE(kinds(QStringLiteral("`a *b* c`")),
+                 QList<int>{int(MarkdownHighlighter::InlineKind::Code)});
+        QCOMPARE(kinds(QStringLiteral("`[a](b)`")),
+                 QList<int>{int(MarkdownHighlighter::InlineKind::Code)});
+        QCOMPARE(kinds(QStringLiteral("`a ~~b~~ c`")),
+                 QList<int>{int(MarkdownHighlighter::InlineKind::Code)});
 
         // An underscore inside a word is a character, not a marker.
         QVERIFY(kinds(QStringLiteral("snake_case_name here")).isEmpty());
@@ -2099,13 +2106,20 @@ private slots:
         const QTextCharFormat headingCode = formatAt(document, 0, 5);
         const QTextCharFormat bodyCode = formatAt(document, 2, 6);
 
-        // The code span carries the code background and the monospace family.
+        // The code span carries the chip background and the monospace family.
         QVERIFY(headingCode.background() != heading.background());
         QCOMPARE(headingCode.background(), bodyCode.background());
         QCOMPARE(headingCode.fontFamilies().toStringList(),
                  bodyCode.fontFamilies().toStringList());
         // And it is still heading-sized, which is larger than code in prose.
         QVERIFY(headingCode.fontPointSize() > bodyCode.fontPointSize());
+
+        // The backticks keep their cells and paint nothing, so the chip has a
+        // space of its own either side of the code rather than clamping to it.
+        const QTextCharFormat tick = formatAt(document, 2, 5);
+        QCOMPARE(tick.background(), bodyCode.background());
+        QCOMPARE(tick.foreground().color().alpha(), 0);
+        QVERIFY(!tick.hasProperty(QTextFormat::FontLetterSpacing));
     }
 
     void loadsCurrentOmarchyTheme() {

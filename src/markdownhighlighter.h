@@ -55,7 +55,8 @@ public:
         int length;
     };
 
-    enum class InlineKind { Bold, Italic, BoldItalic, Strikethrough, Link, Image, Heading };
+    enum class InlineKind { Bold, Italic, BoldItalic, Strikethrough, Link, Image,
+                            Heading, Code };
 
     struct InlineMarkup {
         InlineKind kind;
@@ -109,6 +110,9 @@ public:
     // slab is drawn behind the editor from QML; inline code uses it as a
     // character background.
     static QColor codeBackgroundFor(const QString &pageBackground, bool darkMode);
+    // Inline code sits on top of the page rather than in it, so its chip is
+    // brighter where the block slab is darker.
+    static QColor inlineCodeBackgroundFor(const QString &pageBackground, bool darkMode);
 
     // The colour list markers, pipes and fences are drawn in, so anything
     // drawn in their place matches them.
@@ -148,6 +152,9 @@ private:
     QStringList m_tableFamilies;
     QTextCharFormat m_markerFormat;
     QTextCharFormat m_hiddenMarkerFormat;
+    // A backtick keeps its cell and paints nothing, so the chip behind a code
+    // span has a space of its own either side of the code.
+    QTextCharFormat m_codeMarkerFormat;
     // Same metrics as the character it replaces, but painting nothing, so
     // whatever is drawn in its place lands exactly where it sat.
     QTextCharFormat m_invisibleMarkerFormat;
