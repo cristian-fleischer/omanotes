@@ -881,6 +881,12 @@ void Backend::setCursorPosition(int position) {
     if (!m_document || !m_highlighter)
         return;
 
+    // Setting the text moves the caret to the end of it, and applying the
+    // typography moves it again. Neither is the reader putting it anywhere, so
+    // neither may reveal a table or count as visiting one.
+    if (m_loading || m_formattingTypography)
+        return;
+
     const QTextBlock block =
         m_document->findBlock(qBound(0, position, m_document->characterCount() - 1));
     if (!block.isValid())
@@ -957,14 +963,17 @@ void Backend::setCursorPosition(int position) {
     if (revealed.first < 0)
         revealed = runContaining(false);
 
+    const bool revealChanged = revealed.first != m_revealedFirstBlock
+        || revealed.second != m_revealedLastBlock;
     m_revealedFirstBlock = revealed.first;
     m_revealedLastBlock = revealed.second;
     m_highlighter->setRevealedRange(revealed.first, revealed.second);
 
-    // A table tidied on the way out only becomes a grid once the caret is
-    // recorded as outside it, so the rows it covers are worked out here rather
-    // than during the edit, when the caret was still in them.
-    if (tidied)
+    // A revealed table is not a gridded one, so which rows carry a grid has to
+    // be worked out again once the caret is recorded where it now is. Only when
+    // the range moved, which is when the caret enters or leaves a table or a
+    // fenced block, and not on every keystroke.
+    if (tidied || revealChanged)
         updateTableGrids();
 }
 

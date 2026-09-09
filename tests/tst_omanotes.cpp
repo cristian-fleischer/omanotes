@@ -216,6 +216,81 @@ private slots:
         QCOMPARE(line(0), settled);
     }
 
+    // Setting the text moves the caret to the end of it, which is inside a
+    // table when the note ends with one. That is not the reader revealing
+    // anything, and the grid must not be worked out around it: the note came
+    // up with its last table drawn as rules and written out in pipes at once.
+    void aTableAtTheEndOfANoteIsStillGridded() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        QTemporaryDir vaultDirectory;
+        QVERIFY(vaultDirectory.isValid());
+        const QString path = vaultDirectory.filePath(QStringLiteral("ends-in-a-table.md"));
+        QFile seed(path);
+        QVERIFY(seed.open(QIODevice::WriteOnly));
+        seed.write("# Schedule\n"
+                   "\n"
+                   "| Day | Cris   |\n"
+                   "|-----|--------|\n"
+                   "| Mon | O 100% |\n"
+                   "\n"
+                   "| one  | two  |\n"
+                   "|------|------|\n"
+                   "| four | five |\n"
+                   "\n"
+                   "| a | b |\n"
+                   "|---|---|\n"
+                   "| ragged | c |");
+        seed.close();
+
+        Backend backend;
+        VaultModel vault;
+        vault.setRoot(vaultDirectory.path());
+
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        engine.rootContext()->setContextProperty(QStringLiteral("vault"), &vault);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        backend.open(QUrl::fromLocalFile(path));
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+        QTextDocument *document =
+            qobject_cast<QQuickTextDocument *>(
+                editor->property("textDocument").value<QObject *>())->textDocument();
+        QVERIFY(document);
+        document->setTextWidth(600);
+        (void)document->size();
+
+        // Opening it changed nothing, whatever the caret did on the way in.
+        // The ragged table at the very end is where that shows: the caret
+        // lands in it, and tidying on the way out would rewrite it.
+        QVERIFY(!backend.modified());
+        QCOMPARE(document->findBlockByNumber(11).text(), QStringLiteral("|---|---|"));
+
+        const QVariantList regions = backend.tableRegions();
+        QCOMPARE(regions.size(), 3);
+        for (int table = 0; table < 2; ++table) {
+            const QVariantMap region = regions.at(table).toMap();
+            QVERIFY(!region.value(QStringLiteral("editing")).toBool());
+            QVERIFY(!region.value(QStringLiteral("columns")).toList().isEmpty());
+        }
+
+        // Both aligned tables fold their pipes, the second one included: it is
+        // the one the caret passed through while the text was being set.
+        for (int block : {2, 3, 4, 6, 7, 8})
+            QCOMPARE(formatAt(*document, block, 0).fontPointSize(), 1.0);
+
+        // The ragged one keeps everything it was written with.
+        QVERIFY(regions.at(2).toMap().value(QStringLiteral("columns")).toList().isEmpty());
+        for (int block : {10, 11, 12})
+            QVERIFY(!qFuzzyCompare(formatAt(*document, block, 0).fontPointSize(), 1.0));
+    }
+
     void tableRegionsShareOnlyAlignedColumns() {
         QTemporaryDir directory;
         QVERIFY(directory.isValid());
