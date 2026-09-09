@@ -2,7 +2,7 @@
 
 A Markdown notes app for Linux: an editor that styles Markdown inline as you
 type, and a sidebar listing a folder of `.md` files. No GTK, no Chromium, no
-browser engine. Qt 6 and about 600 KB.
+browser engine. Qt 6, one 1.3 MB binary, no runtime dependency outside Qt.
 
 The buffer always holds your exact Markdown. Styling is applied over the source,
 never a conversion, and saving writes the bytes you see back unchanged.
@@ -178,6 +178,30 @@ Text also follows the desktop text size — `omarchy display text size`, or GNOM
 `text-scaling-factor` — and re-flows without a restart. The default of 12px leaves
 the app at the size it is designed around; larger and smaller sizes scale from
 there, and the zoom multiplies on top.
+
+## Footprint
+
+Measured on Arch with Qt 6.11, a Wayland session and an AMD iGPU, against
+upstream omawrite 0.5.0 on the same machine and the same file.
+
+| | Omanotes | omawrite |
+| --- | --- | --- |
+| Binary | 1.3 MB | 572 KB |
+| Installed package | 1.29 MB | 565 KB |
+| PSS, short note idle | 82 MB | 71 MB |
+| PSS, 62 KB note idle | 118 MB | 99 MB |
+| CPU to open a 62 KB note | 1.25 s | 0.45 s |
+| CPU idle, per 12 s | 0.01 s | 0.00 s |
+
+The binary is bigger because of Lexilla (379 KB of lexers) and roughly 165 KB of
+extra code. 401 KB of both binaries is the bundled font, which comes from
+upstream.
+
+Most of the memory is neither app: 38 MB of the 118 MB is the Mesa GL stack the
+scene graph pulls in, which `QT_QUICK_BACKEND=software` removes at the cost of
+frame rate. Startup is identical to upstream at 0.26 s of CPU; the extra second
+on a 62 KB note is the first inline-highlight pass over 1,700 lines, and it does
+not recur.
 
 ## Requirements
 
