@@ -2,7 +2,12 @@
 
 A Markdown notes app for Linux: an editor that styles Markdown inline as you
 type, and a sidebar listing a folder of `.md` files. No GTK, no Chromium, no
-browser engine. Qt 6, one 1.3 MB binary, no runtime dependency outside Qt.
+browser engine.
+
+Lean and quick on purpose. One 987 KB binary, nothing at runtime outside Qt 6,
+and a note on screen in well under half a second: 0.26 s for a short note and
+0.40 s for a 62 KB one, wall clock from exec to the window. The numbers are
+measured, and there is a [table of them](#footprint) further down.
 
 The buffer always holds your exact Markdown. Styling is applied over the source,
 never a conversion, and saving writes the bytes you see back unchanged.
