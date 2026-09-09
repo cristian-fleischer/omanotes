@@ -38,6 +38,8 @@ public:
         IsExpandedRole,
         HasDraftRole,
         MatchesContentRole,
+        IsDraftRole,
+        IsHeaderRole,
     };
     Q_ENUM(Role)
 
@@ -69,7 +71,17 @@ public:
     Q_INVOKABLE QUrl urlAt(int row) const;
     Q_INVOKABLE QString pathAt(int row) const;
     Q_INVOKABLE int rowForPath(const QString &path) const;
-    Q_INVOKABLE QString createNote();
+    // Creates a draft in `relativeDir`, or in the vault root when it is empty.
+    Q_INVOKABLE QString createNote(const QString &relativeDir = QString());
+    // Every folder in the vault, relative to the root, for the move menu.
+    Q_INVOKABLE QStringList folders() const;
+    // Moves a note into `relativeDir`. Returns its new path, or empty.
+    Q_INVOKABLE QString moveNote(const QString &path, const QString &relativeDir);
+    // To the desktop trash where there is one, so it can be put back.
+    Q_INVOKABLE bool deleteNote(const QString &path);
+    Q_INVOKABLE QString relativeDirAt(int row) const;
+    Q_INVOKABLE bool isHeaderAt(int row) const;
+    Q_INVOKABLE QString titleAt(int row) const;
     Q_INVOKABLE bool isDirectoryAt(int row) const;
     Q_INVOKABLE void toggleExpanded(int row);
     Q_INVOKABLE void setExpanded(int row, bool expanded);
@@ -87,6 +99,17 @@ public:
     void loadSettings();
     static QString defaultRoot();
 
+    // A note with no name yet lives in `.omanotes/drafts` inside the folder it
+    // belongs to, so the vault proper never holds a file called untitled.
+    static QString draftsDirectoryFor(const QString &folder);
+    static bool isDraftPath(const QString &path);
+    // The folder a draft is promoted into on save: the one holding its
+    // `.omanotes`. Empty when the path is not a draft.
+    static QString folderForDraft(const QString &path);
+    // The first line with anything on it, for labelling a draft. Reads the
+    // head of the file, never the whole of it.
+    static QString firstLineOf(const QString &path);
+
 signals:
     void rootChanged();
     void filterChanged();
@@ -103,6 +126,7 @@ private:
         QString relativePath;
         QString path;
         QDateTime modified;
+        bool draft = false;
     };
 
     // One visible row: a folder or a note, at a depth in the tree.
@@ -114,9 +138,13 @@ private:
         QDateTime modified;
         int depth = 0;
         bool directory = false;
+        bool draft = false;
+        // A section label rather than anything you can open.
+        bool header = false;
     };
 
     void scan();
+    void scanDrafts(const QString &directory);
     void rebuildRows();
     void appendDirectory(const QString &relativeDir, int depth,
                          const QHash<QString, QList<int>> &files,

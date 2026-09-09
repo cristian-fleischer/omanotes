@@ -1,4 +1,5 @@
 #include "vaultmodel.h"
+#include "backend.h"
 
 #include <QDebug>
 #include <QDir>
@@ -248,7 +249,8 @@ QVariant VaultModel::data(const QModelIndex &index, int role) const {
     case ModifiedRole:
         return node.modified;
     case IsCurrentRole:
-        return !node.directory && !m_currentPath.isEmpty() && node.path == m_currentPath;
+        return !node.directory && !node.header && !m_currentPath.isEmpty()
+            && node.path == m_currentPath;
     case DepthRole:
         return node.depth;
     case IsDirectoryRole:
@@ -261,6 +263,10 @@ QVariant VaultModel::data(const QModelIndex &index, int role) const {
         return !node.directory && !m_filter.isEmpty()
             && !node.relativePath.contains(m_filter, Qt::CaseInsensitive)
             && m_contentMatches.contains(node.path);
+    case IsDraftRole:
+        return node.draft;
+    case IsHeaderRole:
+        return node.header;
     default:
         return {};
     }
@@ -276,7 +282,9 @@ QHash<int, QByteArray> VaultModel::roleNames() const {
             {IsDirectoryRole, "isDirectory"},
             {IsExpandedRole, "isExpanded"},
             {HasDraftRole, "hasDraft"},
-            {MatchesContentRole, "matchesContent"}};
+            {MatchesContentRole, "matchesContent"},
+            {IsDraftRole, "isDraft"},
+            {IsHeaderRole, "isHeader"}};
 }
 
 QUrl VaultModel::urlAt(int row) const {
@@ -388,6 +396,76 @@ void VaultModel::resetRows() {
     emit countChanged();
 }
 
+namespace {
+constexpr auto draftsFolderName = "drafts";
+constexpr auto stateFolderName = ".omanotes";
+}
+
+QString VaultModel::draftsDirectoryFor(const QString &folder) {
+    return QDir(folder).filePath(QStringLiteral("%1/%2")
+                                     .arg(QLatin1String(stateFolderName),
+                                          QLatin1String(draftsFolderName)));
+}
+
+bool VaultModel::isDraftPath(const QString &path) {
+    return !folderForDraft(path).isEmpty();
+}
+
+QString VaultModel::folderForDraft(const QString &path) {
+    const QDir drafts = QFileInfo(path).dir();
+    if (drafts.dirName() != QLatin1String(draftsFolderName))
+        return {};
+    QDir state = drafts;
+    if (!state.cdUp() || state.dirName() != QLatin1String(stateFolderName))
+        return {};
+    QDir owner = state;
+    if (!owner.cdUp())
+        return {};
+    return owner.absolutePath();
+}
+
+QString VaultModel::firstLineOf(const QString &path) {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return {};
+    // A title comes off the first line with anything on it, so the head of the
+    // file is all this needs to see.
+    const QString head = QString::fromUtf8(file.read(4096));
+    for (const QStringView line : QStringView(head).split(QLatin1Char('\n'))) {
+        if (!line.trimmed().isEmpty())
+            return line.toString();
+    }
+    return {};
+}
+
+// Drafts sit in a dot-directory, which the walk prunes, so they are collected
+// on their own. There are only ever a handful, and reading a title costs one
+// short read each.
+void VaultModel::scanDrafts(const QString &directory) {
+    const QString draftsPath = draftsDirectoryFor(directory);
+    QDir drafts(draftsPath);
+    if (!drafts.exists())
+        return;
+
+    const QDir rootDir(m_canonicalRoot);
+    const QFileInfoList found =
+        drafts.entryInfoList(QStringList{QStringLiteral("*.md")}, QDir::Files, QDir::Name);
+    for (const QFileInfo &info : found) {
+        Entry entry;
+        entry.path = info.absoluteFilePath();
+        entry.draft = true;
+        entry.title = Backend::titleFromText(firstLineOf(entry.path));
+        if (entry.title.isEmpty())
+            entry.title = QStringLiteral("Draft");
+        entry.relativePath = rootDir.relativeFilePath(entry.path);
+        entry.relativeDir = rootDir.relativeFilePath(directory);
+        if (entry.relativeDir == QStringLiteral("."))
+            entry.relativeDir.clear();
+        entry.modified = info.lastModified();
+        m_entries.append(entry);
+    }
+}
+
 void VaultModel::scan() {
     m_entries.clear();
     m_scannedDirectories.clear();
@@ -409,6 +487,7 @@ void VaultModel::scan() {
     while (!queue.isEmpty()) {
         const QString directory = queue.takeFirst();
         m_scannedDirectories.append(directory);
+        scanDrafts(directory);
 
         // QDirIterator::Subdirectories cannot prune a subtree, and a vault is
         // full of subtrees worth pruning: .git alone would swallow the file
@@ -481,19 +560,54 @@ void VaultModel::rebuildRows() {
     m_rows.clear();
     m_visibleNotes = 0;
 
+    const auto appendNote = [this](const Entry &entry, int depth) {
+        m_rows.append(Node{entry.title, entry.relativeDir, entry.relativePath,
+                           entry.path, entry.modified, depth, false, entry.draft, false});
+        ++m_visibleNotes;
+    };
+    const auto appendHeader = [this](const QString &label) {
+        Node node;
+        node.title = label;
+        node.header = true;
+        m_rows.append(node);
+    };
+
     // A filter flattens the tree. What matters while typing is finding the
     // note, not where in the folders it lives, so matches are listed with their
     // parent directory beside them instead of nested under it.
     if (!m_filter.isEmpty()) {
+        // Name matches first, then what ripgrep found inside the notes. A name
+        // is the stronger answer, and mixing the two buries it.
+        QList<const Entry *> byName;
+        QList<const Entry *> byContent;
         for (const Entry &entry : m_entries) {
-            if (!entry.relativePath.contains(m_filter, Qt::CaseInsensitive)
-                    && !m_contentMatches.contains(entry.path))
-                continue;
-            m_rows.append(Node{entry.title, entry.relativeDir, entry.relativePath,
-                               entry.path, entry.modified, 0, false});
-            ++m_visibleNotes;
+            if (entry.relativePath.contains(m_filter, Qt::CaseInsensitive)
+                    || (entry.draft && entry.title.contains(m_filter, Qt::CaseInsensitive)))
+                byName.append(&entry);
+            else if (m_contentMatches.contains(entry.path))
+                byContent.append(&entry);
+        }
+        for (const Entry *entry : std::as_const(byName))
+            appendNote(*entry, 0);
+        if (!byContent.isEmpty()) {
+            appendHeader(QStringLiteral("Found in text"));
+            for (const Entry *entry : std::as_const(byContent))
+                appendNote(*entry, 0);
         }
         return;
+    }
+
+    // Drafts have no place in the tree until they are named, so they get a
+    // section of their own above it.
+    QList<const Entry *> drafts;
+    for (const Entry &entry : m_entries) {
+        if (entry.draft)
+            drafts.append(&entry);
+    }
+    if (!drafts.isEmpty()) {
+        appendHeader(QStringLiteral("Drafts"));
+        for (const Entry *entry : std::as_const(drafts))
+            appendNote(*entry, 0);
     }
 
     // Group the scanned files by their directory, and record every directory
@@ -503,6 +617,8 @@ void VaultModel::rebuildRows() {
     QHash<QString, QStringList> subdirectories;
     QSet<QString> known;
     for (int i = 0; i < m_entries.size(); ++i) {
+        if (m_entries.at(i).draft)
+            continue;
         const QString directory = m_entries.at(i).relativeDir;
         files[directory].append(i);
         QString path = directory;
@@ -546,7 +662,7 @@ void VaultModel::appendDirectory(const QString &relativeDir, int depth,
     for (int index : files.value(relativeDir)) {
         const Entry &entry = m_entries.at(index);
         m_rows.append(Node{entry.title, entry.relativeDir, entry.relativePath,
-                           entry.path, entry.modified, depth, false});
+                           entry.path, entry.modified, depth, false, false, false});
         ++m_visibleNotes;
     }
 }
@@ -563,19 +679,22 @@ void VaultModel::rewatch() {
         m_watcher.addPaths(m_scannedDirectories);
 }
 
-QString VaultModel::createNote() {
+QString VaultModel::createNote(const QString &relativeDir) {
     if (m_root.isEmpty())
         return {};
 
-    QDir directory(m_root);
-    if (!directory.exists() && !QDir().mkpath(m_root))
+    const QString folder = relativeDir.isEmpty() ? m_root
+                                                 : QDir(m_root).filePath(relativeDir);
+    const QString draftsPath = draftsDirectoryFor(folder);
+    if (!QDir().mkpath(draftsPath))
         return {};
 
-    QString name = QStringLiteral("untitled.md");
-    for (int suffix = 2; directory.exists(name); ++suffix)
-        name = QStringLiteral("untitled-%1.md").arg(suffix);
+    QDir drafts(draftsPath);
+    QString name = QStringLiteral("draft.md");
+    for (int suffix = 2; drafts.exists(name); ++suffix)
+        name = QStringLiteral("draft-%1.md").arg(suffix);
 
-    const QString path = directory.filePath(name);
+    const QString path = drafts.filePath(name);
     QFile file(path);
     // NewOnly fails rather than truncating, so a note created between the
     // check above and here survives.
@@ -585,4 +704,82 @@ QString VaultModel::createNote() {
 
     refresh();
     return QDir::cleanPath(path);
+}
+
+QStringList VaultModel::folders() const {
+    QSet<QString> seen;
+    for (const Entry &entry : m_entries) {
+        if (entry.draft)
+            continue;
+        QString path = entry.relativeDir;
+        while (!path.isEmpty() && !seen.contains(path)) {
+            seen.insert(path);
+            const int slash = path.lastIndexOf(QLatin1Char('/'));
+            path = slash < 0 ? QString() : path.left(slash);
+        }
+    }
+    QStringList all(seen.cbegin(), seen.cend());
+    std::sort(all.begin(), all.end(), [](const QString &a, const QString &b) {
+        return a.compare(b, Qt::CaseInsensitive) < 0;
+    });
+    return all;
+}
+
+QString VaultModel::relativeDirAt(int row) const {
+    if (row < 0 || row >= m_rows.size())
+        return {};
+    const Node &node = m_rows.at(row);
+    return node.directory ? node.relativePath : node.relativeDir;
+}
+
+bool VaultModel::isHeaderAt(int row) const {
+    return row >= 0 && row < m_rows.size() && m_rows.at(row).header;
+}
+
+QString VaultModel::titleAt(int row) const {
+    return row >= 0 && row < m_rows.size() ? m_rows.at(row).title : QString();
+}
+
+QString VaultModel::moveNote(const QString &path, const QString &relativeDir) {
+    const QString canonical = QFileInfo(path).canonicalFilePath();
+    if (m_canonicalRoot.isEmpty() || canonical.isEmpty()
+            || !isInside(canonical, m_canonicalRoot))
+        return {};
+
+    const QString folder = relativeDir.isEmpty()
+        ? m_canonicalRoot : QDir(m_canonicalRoot).filePath(relativeDir);
+    if (!QDir().mkpath(folder))
+        return {};
+
+    const QFileInfo info(canonical);
+    if (QDir(folder).canonicalPath() == info.dir().canonicalPath())
+        return canonical;
+
+    QDir target(folder);
+    const QString stem = info.completeBaseName();
+    QString name = info.fileName();
+    for (int suffix = 2; target.exists(name); ++suffix)
+        name = QStringLiteral("%1-%2.md").arg(stem).arg(suffix);
+
+    const QString destination = target.filePath(name);
+    if (!QFile::rename(canonical, destination))
+        return {};
+
+    refresh();
+    return QDir::cleanPath(destination);
+}
+
+bool VaultModel::deleteNote(const QString &path) {
+    const QString canonical = QFileInfo(path).canonicalFilePath();
+    if (m_canonicalRoot.isEmpty() || canonical.isEmpty()
+            || !isInside(canonical, m_canonicalRoot))
+        return false;
+
+    QFile file(canonical);
+    // The desktop trash where there is one, so a note deleted by mistake can
+    // be put back. remove() only when there is no trash to move it to.
+    const bool gone = file.moveToTrash() || file.remove();
+    if (gone)
+        refresh();
+    return gone;
 }

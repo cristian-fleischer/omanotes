@@ -102,6 +102,11 @@ public:
     Q_INVOKABLE void persistDraft();
     Q_INVOKABLE void discardDraftFor(const QUrl &url);
     Q_INVOKABLE void discardRecovery();
+    // Lets go of the open file without touching it: the buffer empties, the
+    // watcher stops, and the draft under it is dropped. For deleting the note
+    // that is open, where the watcher would otherwise call our own delete an
+    // outside change.
+    Q_INVOKABLE void closeFile();
     Q_INVOKABLE void reloadFromDisk();
     Q_INVOKABLE void keepExternalVersion();
     Q_INVOKABLE void printDocument();
@@ -166,6 +171,9 @@ signals:
     void draftsChanged();
     void externalChangeDetected(bool deleted, bool locallyModified);
     void placeholderTitleChanged();
+    // A draft's text has just been written to its own file, so the sidebar can
+    // pick up its title.
+    void draftWritten();
     // A note's text has just been put in the buffer, by an open or a restored
     // draft. Setting the text leaves the document cursor at the end, so the
     // view has to be told to go back to the top.
@@ -184,6 +192,12 @@ private:
     // nothing to name it or the rename fails.
     QUrl renameToTitle(const QUrl &url, const QString &text);
     void updateCurrentTitle(const QString &text);
+    // True for a note that has no name of its own yet: one in a drafts folder,
+    // or an untitled.md left by an older version.
+    bool currentIsUnnamed() const;
+    // Drafts are the app's own scratch files, so they are written as you go.
+    // Returns true when something was written.
+    bool writeDraftFile();
     QString resolveLocalPath(const QString &token) const;
     void setWordCount(int words);
     void refreshWordCount();

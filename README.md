@@ -108,17 +108,25 @@ down to it. Typing in the filter flattens the tree to the matches. Set the root
 from the folder icon in the sidebar footer; the default is `$HOME/Notes`.
 
 The filter matches the path as you type, and a moment later also what is written
-inside the notes, using ripgrep if it is installed and grep otherwise.
+inside the notes, using ripgrep if it is installed and grep otherwise. Those two
+kinds of match are listed as two groups.
 
-A new note is created as `untitled.md` because there is nothing to call it yet.
-The sidebar labels it with its first line as soon as you type one, and the first
-save renames the file to match: `# Meeting notes` becomes `Meeting notes.md`.
-Only that first save, and only while the file is still empty, so a note you
-called untitled yourself keeps the name you gave it, and renaming is never
-something a later save does behind your back.
+A new note has no name yet, so it starts as a draft in `.omanotes/drafts` inside
+the folder it belongs to, never in the vault proper. Drafts get a section of
+their own at the top of the sidebar, labelled by their first line, and they are
+written as you type so the label survives switching notes and closing the app.
+Saving one names it and moves it out: `# Meeting notes` becomes
+`Meeting notes.md` in the folder that held the drafts directory. Save As offers
+the same name rather than "draft".
 
-Notes with unsaved changes are marked with a dot, and a draft that has no file
-behind it yet gets a row of its own at the top.
+The filter matches note names first and lists what ripgrep found inside the
+notes below, under a heading of its own, because a name is the stronger answer.
+
+Right-click a row for the rest: a new note in that folder, move to another
+folder, or delete. Deleting goes to the desktop trash, after a confirmation, so
+it can be put back.
+
+Notes with unsaved changes are marked with a dot.
 
 ## Shortcuts
 

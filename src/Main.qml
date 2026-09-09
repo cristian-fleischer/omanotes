@@ -122,12 +122,31 @@ ApplicationWindow {
         editor.forceActiveFocus();
     }
 
-    function createNote() {
-        var path = vault.createNote();
+    function createNote(relativeDir) {
+        var path = vault.createNote(relativeDir === undefined ? "" : relativeDir);
         if (path === "") {
             return;
         }
         win.requestOpen(vault.urlForPath(path));
+        editor.forceActiveFocus();
+    }
+
+    // Moving or deleting the note that is open has to take the editor with it,
+    // or the file watcher reports our own change as an outside edit.
+    function moveNote(path, relativeDir) {
+        var wasOpen = backend.fileUrl.toString() === vault.urlForPath(path).toString();
+        var moved = vault.moveNote(path, relativeDir);
+        if (moved === "")
+            return;
+        if (wasOpen)
+            backend.open(vault.urlForPath(moved));
+    }
+
+    function deleteNote(path) {
+        var wasOpen = backend.fileUrl.toString() === vault.urlForPath(path).toString();
+        if (wasOpen)
+            backend.closeFile();
+        vault.deleteNote(path);
     }
 
     function toggleSidebar() {
@@ -470,6 +489,12 @@ ApplicationWindow {
             vault.setDraftPaths(backend.draftPaths);
         }
 
+        // A draft's file has just caught up with the buffer, so the row can be
+        // relabelled with what is now its first line.
+        function onDraftWritten() {
+            vault.refresh();
+        }
+
         function onModifiedChanged() {
             vault.setDraftPaths(backend.draftPaths);
         }
@@ -536,6 +561,24 @@ ApplicationWindow {
     }
 
     Dialog {
+        id: deleteNoteDialog
+        objectName: "deleteNoteDialog"
+        property string notePath: ""
+        property string noteTitle: ""
+        modal: true
+        Overlay.modal: Rectangle { color: Qt.rgba(0, 0, 0, 0.55) }
+        title: "Delete note"
+        standardButtons: Dialog.Cancel | Dialog.Ok
+        anchors.centerIn: parent
+        onAccepted: win.deleteNote(deleteNoteDialog.notePath)
+        contentItem: Label {
+            text: "Move \u201c" + deleteNoteDialog.noteTitle
+                  + "\u201d to the trash?\nYou can put it back from your file manager."
+            lineHeight: 1.4
+        }
+    }
+
+    Dialog {
         id: shortcutsDialog
         modal: true
 
@@ -591,7 +634,13 @@ ApplicationWindow {
 
             onNoteActivated: function(fileUrl) { win.openFromVault(fileUrl); }
             onDraftActivated: editor.forceActiveFocus()
-            onNewNoteRequested: win.createNote()
+            onNewNoteRequested: function(relativeDir) { win.createNote(relativeDir); }
+            onMoveRequested: function(path, relativeDir) { win.moveNote(path, relativeDir); }
+            onDeleteRequested: function(path, title) {
+                deleteNoteDialog.notePath = path;
+                deleteNoteDialog.noteTitle = title;
+                deleteNoteDialog.open();
+            }
             onRootChangeRequested: vaultRootDialog.open()
             onDismissed: {
                 win.sidebarVisible = false;

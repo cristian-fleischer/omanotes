@@ -7,6 +7,7 @@
 #include <QColor>
 #include <QElapsedTimer>
 #include <QFontDatabase>
+#include <QSignalSpy>
 #include <QQuickTextDocument>
 #include <QWindow>
 #include <QQmlComponent>
@@ -1130,11 +1131,68 @@ private slots:
         QCOMPARE(roleOf(model, 3, VaultModel::IsCurrentRole).toBool(), true);
         QCOMPARE(model.rowForPath(model.pathAt(3)), 3);
 
+        // A new note has no name yet, so it starts as a draft beside the vault
+        // rather than in it, and gets a section of its own at the top.
         const QString created = model.createNote();
         QVERIFY(!created.isEmpty());
-        QCOMPARE(QFileInfo(created).fileName(), QStringLiteral("untitled.md"));
-        QCOMPARE(QFileInfo(model.createNote()).fileName(), QStringLiteral("untitled-2.md"));
+        QCOMPARE(QFileInfo(created).fileName(), QStringLiteral("draft.md"));
+        QCOMPARE(QFileInfo(created).dir().absolutePath(),
+                 VaultModel::draftsDirectoryFor(vault.path()));
+        QVERIFY(VaultModel::isDraftPath(created));
+        QCOMPARE(VaultModel::folderForDraft(created), QDir(vault.path()).canonicalPath());
+        QCOMPARE(QFileInfo(model.createNote()).fileName(), QStringLiteral("draft-2.md"));
         QCOMPARE(model.count(), 6);
+        QCOMPARE(roleOf(model, 0, VaultModel::IsHeaderRole).toBool(), true);
+        QCOMPARE(roleOf(model, 0, VaultModel::TitleRole).toString(), QStringLiteral("Drafts"));
+        QCOMPARE(roleOf(model, 1, VaultModel::IsDraftRole).toBool(), true);
+
+        // A draft in a subfolder keeps its own drafts folder there.
+        const QString nested = model.createNote(QStringLiteral("projects"));
+        QCOMPARE(VaultModel::folderForDraft(nested),
+                 QDir(vault.path()).absoluteFilePath(QStringLiteral("projects")));
+    }
+
+    void vaultModelMovesAndDeletes() {
+        QTemporaryDir vault;
+        QVERIFY(vault.isValid());
+        QVERIFY(writeNote(vault.path(), QStringLiteral("Note.md")));
+        QVERIFY(writeNote(vault.path(), QStringLiteral("projects/Beta.md")));
+        QVERIFY(writeNote(vault.path(), QStringLiteral("projects/deep/Gamma.md")));
+
+        VaultModel model;
+        model.setRoot(vault.path());
+        QCOMPARE(model.folders(),
+                 (QStringList{QStringLiteral("projects"), QStringLiteral("projects/deep")}));
+
+        const QString note = QDir(vault.path()).filePath(QStringLiteral("Note.md"));
+        const QString moved = model.moveNote(note, QStringLiteral("projects/deep"));
+        QVERIFY(!moved.isEmpty());
+        QVERIFY(QFile::exists(moved));
+        QVERIFY(!QFile::exists(note));
+        QCOMPARE(QFileInfo(moved).dir().dirName(), QStringLiteral("deep"));
+        QCOMPARE(model.totalCount(), 3);
+
+        // A name already in the target folder is not overwritten.
+        QVERIFY(writeNote(vault.path(), QStringLiteral("Beta.md")));
+        model.refresh();
+        const QString clash = QDir(vault.path()).filePath(QStringLiteral("Beta.md"));
+        const QString settled = model.moveNote(clash, QStringLiteral("projects"));
+        QCOMPARE(QFileInfo(settled).fileName(), QStringLiteral("Beta-2.md"));
+        QVERIFY(QFile::exists(QDir(vault.path()).filePath(QStringLiteral("projects/Beta.md"))));
+
+        // Nothing outside the vault can be moved or deleted through the model.
+        QTemporaryDir elsewhere;
+        QVERIFY(elsewhere.isValid());
+        QVERIFY(writeNote(elsewhere.path(), QStringLiteral("Outside.md")));
+        const QString outside = QDir(elsewhere.path()).filePath(QStringLiteral("Outside.md"));
+        QCOMPARE(model.moveNote(outside, QString()), QString());
+        QVERIFY(!model.deleteNote(outside));
+        QVERIFY(QFile::exists(outside));
+
+        QVERIFY(model.deleteNote(moved));
+        QVERIFY(!QFile::exists(moved));
+        model.refresh();
+        QCOMPARE(model.totalCount(), 3);
     }
 
     void vaultModelCollapsesFolders() {
@@ -1247,6 +1305,16 @@ private slots:
         QVERIFY(titles.contains(QStringLiteral("minutes")));
         QVERIFY(titles.contains(QStringLiteral("ferroalloy-by-name")));
 
+        // A name match answers the question; a line buried in a file is a
+        // weaker answer, so it goes under a heading of its own below.
+        QCOMPARE(model.rowCount(), 3);
+        QCOMPARE(roleOf(model, 0, VaultModel::TitleRole).toString(),
+                 QStringLiteral("ferroalloy-by-name"));
+        QVERIFY(model.isHeaderAt(1));
+        QCOMPARE(model.titleAt(1), QStringLiteral("Found in text"));
+        QCOMPARE(roleOf(model, 2, VaultModel::TitleRole).toString(),
+                 QStringLiteral("minutes"));
+
         // A note found only by its text says so, one found by name does not.
         for (int row = 0; row < model.rowCount(); ++row) {
             const bool byContent = roleOf(model, row, VaultModel::MatchesContentRole).toBool();
@@ -1352,10 +1420,12 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(window.data(), "toggleSidebar"));
         QCOMPARE(window->property("sidebarVisible").toBool(), false);
 
-        QVERIFY(QMetaObject::invokeMethod(window.data(), "createNote"));
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "createNote",
+                                          Q_ARG(QVariant, QVariant(QString()))));
         QCOMPARE(QFileInfo(backend.fileUrl().toLocalFile()).fileName(),
-                 QStringLiteral("untitled.md"));
-        QCOMPARE(list->property("count").toInt(), 5);
+                 QStringLiteral("draft.md"));
+        // The note, plus the draft and the header over it.
+        QCOMPARE(list->property("count").toInt(), 6);
 
         // An edited buffer is marked in the list, and a draft with no file
         // behind it gets a row of its own.
@@ -1579,7 +1649,8 @@ private slots:
         vault.setRoot(vaultDirectory.path());
 
         const QString created = vault.createNote();
-        QCOMPARE(QFileInfo(created).fileName(), QStringLiteral("untitled.md"));
+        QCOMPARE(QFileInfo(created).fileName(), QStringLiteral("draft.md"));
+        QVERIFY(VaultModel::isDraftPath(created));
 
         QQmlEngine engine;
         QScopedPointer<QObject> editor(createEditor(&engine));
@@ -1616,6 +1687,83 @@ private slots:
         backend.editorTextChanged();
         backend.save();
         QCOMPARE(backend.fileUrl(), QUrl::fromLocalFile(renamed));
+    }
+
+    // The title has to outlive the buffer: leave the draft for another note and
+    // the sidebar still knows what to call it.
+    void aDraftKeepsItsTitleWhenYouLeaveIt() {
+        QTemporaryDir vaultDirectory;
+        QVERIFY(vaultDirectory.isValid());
+        QVERIFY(writeNote(vaultDirectory.path(), QStringLiteral("Other.md")));
+        VaultModel vault;
+        vault.setRoot(vaultDirectory.path());
+        const QString draft = vault.createNote();
+
+        QQmlEngine engine;
+        QScopedPointer<QObject> editor(createEditor(&engine));
+        QVERIFY(editor);
+        Backend backend;
+        backend.attachDocument(editor->property("textDocument").value<QObject *>());
+        backend.open(QUrl::fromLocalFile(draft));
+        QVERIFY(QMetaObject::invokeMethod(editor.data(), "insert", Q_ARG(int, 0),
+                                          Q_ARG(QString, QStringLiteral("# Kept title\nbody"))));
+        backend.editorTextChanged();
+        QCOMPARE(backend.placeholderTitle(), QStringLiteral("Kept title"));
+
+        // Autosaving a draft must not look like somebody else editing it: the
+        // open file is watched, and the write replaces it.
+        QSignalSpy outside(&backend, &Backend::externalChangeDetected);
+
+        // Moving to another note writes the draft's own file on the way out.
+        QSignalSpy written(&backend, &Backend::draftWritten);
+        backend.open(QUrl::fromLocalFile(
+            QDir(vaultDirectory.path()).filePath(QStringLiteral("Other.md"))));
+        QCOMPARE(written.count(), 1);
+        QCOMPARE(VaultModel::firstLineOf(draft), QStringLiteral("# Kept title"));
+
+        vault.refresh();
+        int draftRow = -1;
+        for (int row = 0; row < vault.rowCount(); ++row) {
+            if (roleOf(vault, row, VaultModel::IsDraftRole).toBool())
+                draftRow = row;
+        }
+        QVERIFY(draftRow >= 0);
+        QCOMPARE(roleOf(vault, draftRow, VaultModel::TitleRole).toString(),
+                 QStringLiteral("Kept title"));
+
+        // And the buffer's own label is gone, because the draft is not open.
+        QCOMPARE(backend.placeholderTitle(), QString());
+        QTest::qWait(200);
+        QCOMPARE(outside.count(), 0);
+    }
+
+    // Save As on a draft offers the name it would get, not "draft".
+    void saveAsProposesTheTitle() {
+        QTemporaryDir vaultDirectory;
+        QVERIFY(vaultDirectory.isValid());
+        VaultModel vault;
+        vault.setRoot(vaultDirectory.path());
+        const QString draft = vault.createNote();
+
+        QQmlEngine engine;
+        QScopedPointer<QObject> editor(createEditor(&engine));
+        QVERIFY(editor);
+        Backend backend;
+        backend.attachDocument(editor->property("textDocument").value<QObject *>());
+        backend.open(QUrl::fromLocalFile(draft));
+        QVERIFY(QMetaObject::invokeMethod(editor.data(), "insert", Q_ARG(int, 0),
+                                          Q_ARG(QString, QStringLiteral("# Quarterly review\n"))));
+        backend.editorTextChanged();
+
+        QSignalSpy asked(&backend, &Backend::saveDialogRequested);
+        backend.saveAsDialog();
+        QCOMPARE(asked.count(), 1);
+        const QUrl proposed = asked.first().first().toUrl();
+        QCOMPARE(QFileInfo(proposed.toLocalFile()).fileName(),
+                 QStringLiteral("Quarterly review.md"));
+        // In the folder the draft belongs to, not the drafts folder itself.
+        QCOMPARE(QFileInfo(proposed.toLocalFile()).dir().canonicalPath(),
+                 QDir(vaultDirectory.path()).canonicalPath());
     }
 
     void leavesANoteYouNamedUntitledAlone() {

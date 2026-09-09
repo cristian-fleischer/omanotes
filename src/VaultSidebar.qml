@@ -30,7 +30,10 @@ Rectangle {
 
     signal noteActivated(url fileUrl)
     signal draftActivated()
-    signal newNoteRequested()
+    // Empty means the vault root; a folder's path relative to it otherwise.
+    signal newNoteRequested(string relativeDir)
+    signal moveRequested(string path, string relativeDir)
+    signal deleteRequested(string path, string title)
     signal rootChangeRequested()
     signal dismissed()
 
@@ -56,6 +59,8 @@ Rectangle {
 
     function activate(row) {
         if (!sidebar.vaultModel || row < 0 || row >= list.count)
+            return;
+        if (sidebar.vaultModel.isHeaderAt(row))
             return;
         if (sidebar.vaultModel.isDirectoryAt(row)) {
             sidebar.vaultModel.toggleExpanded(row);
@@ -232,6 +237,54 @@ Rectangle {
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
+            // Right-click on a row. What it offers depends on what the row is:
+            // a folder can take a new note, a note can be moved or deleted.
+            Menu {
+                id: rowMenu
+                property string targetPath: ""
+                property string targetTitle: ""
+                property string targetDir: ""
+                property bool targetIsDirectory: false
+
+                function openFor(row, item) {
+                    if (!sidebar.vaultModel)
+                        return;
+                    rowMenu.targetPath = sidebar.vaultModel.pathAt(row);
+                    rowMenu.targetDir = sidebar.vaultModel.relativeDirAt(row);
+                    rowMenu.targetIsDirectory = sidebar.vaultModel.isDirectoryAt(row);
+                    rowMenu.targetTitle = sidebar.vaultModel.titleAt(row);
+                    rowMenu.popup(item);
+                }
+
+                MenuItem {
+                    text: rowMenu.targetIsDirectory ? "New note in this folder" : "New note here"
+                    onTriggered: sidebar.newNoteRequested(rowMenu.targetDir)
+                }
+                MenuSeparator { visible: !rowMenu.targetIsDirectory }
+                Menu {
+                    title: "Move to"
+                    enabled: !rowMenu.targetIsDirectory
+                    visible: !rowMenu.targetIsDirectory
+                    MenuItem {
+                        text: "Vault root"
+                        onTriggered: sidebar.moveRequested(rowMenu.targetPath, "")
+                    }
+                    Repeater {
+                        model: sidebar.vaultModel ? sidebar.vaultModel.folders() : []
+                        MenuItem {
+                            text: modelData
+                            onTriggered: sidebar.moveRequested(rowMenu.targetPath, modelData)
+                        }
+                    }
+                }
+                MenuItem {
+                    text: "Delete\u2026"
+                    enabled: !rowMenu.targetIsDirectory
+                    visible: !rowMenu.targetIsDirectory
+                    onTriggered: sidebar.deleteRequested(rowMenu.targetPath, rowMenu.targetTitle)
+                }
+            }
+
             delegate: ItemDelegate {
                 id: entry
                 width: list.width
@@ -242,12 +295,22 @@ Rectangle {
                     && sidebar.vaultModel !== null && sidebar.vaultModel.filter.length > 0
                 readonly property real indent:
                     sidebar.scaledSize(10 + depth * 13)
-                height: showsParent ? sidebar.scaledSize(44) : sidebar.scaledSize(30)
+                height: isHeader ? sidebar.scaledSize(26)
+                                 : showsParent ? sidebar.scaledSize(44) : sidebar.scaledSize(30)
                 padding: 0
+                enabled: !isHeader
                 onClicked: sidebar.activate(index)
 
+                TapHandler {
+                    enabled: !isHeader
+                    acceptedButtons: Qt.RightButton
+                    onSingleTapped: rowMenu.openFor(index, entry)
+                }
+
                 background: Rectangle {
-                    color: isCurrent
+                    color: isHeader
+                        ? "transparent"
+                        : isCurrent
                         ? Qt.rgba(sidebar.accentColor.r, sidebar.accentColor.g,
                                   sidebar.accentColor.b, sidebar.darkMode ? 0.30 : 0.20)
                         : entry.ListView.isCurrentItem
@@ -261,6 +324,17 @@ Rectangle {
 
                 contentItem: Item {
                     anchors.fill: parent
+
+                    // A section label, not a row you can open.
+                    Text {
+                        visible: isHeader
+                        x: sidebar.scaledSize(10)
+                        anchors.bottom: parent.bottom
+                        anchors.bottomMargin: sidebar.scaledSize(3)
+                        text: title
+                        color: sidebar.mutedColor
+                        font.pixelSize: sidebar.scaledSize(10)
+                    }
 
                     // Drawn rather than typed: iA Writer Mono S has no
                     // geometric-shape glyphs, and a fallback font puts a dot
@@ -308,10 +382,12 @@ Rectangle {
                         height: width
                         radius: width / 2
                         color: sidebar.accentColor
-                        visible: hasDraft || (isCurrent && sidebar.documentModified)
+                        visible: !isHeader && !isDraft
+                                 && (hasDraft || (isCurrent && sidebar.documentModified))
                     }
 
                     Column {
+                        visible: !isHeader
                         x: entry.indent + (isDirectory ? sidebar.scaledSize(13) : 0)
                         width: entry.width - x - sidebar.scaledSize(24)
                         anchors.verticalCenter: parent.verticalCenter
@@ -372,7 +448,7 @@ Rectangle {
                         anchors.margins: -sidebar.scaledSize(6)
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: sidebar.newNoteRequested()
+                        onClicked: sidebar.newNoteRequested("")
                     }
                 }
             }
@@ -404,7 +480,7 @@ Rectangle {
                     iconName: "newnote"
                     iconColor: sidebar.mutedColor
                     tooltip: "New note (Ctrl+Alt+N)"
-                    onClicked: sidebar.newNoteRequested()
+                    onClicked: sidebar.newNoteRequested("")
                 }
 
                 FooterIconButton {

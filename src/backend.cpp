@@ -1,4 +1,5 @@
 #include "backend.h"
+#include "vaultmodel.h"
 
 #include <QClipboard>
 #include <QColor>
@@ -245,6 +246,9 @@ QStringList Backend::draftPaths() const {
 
 // Leaving a note keeps what was typed in it rather than asking about it.
 void Backend::stashDraft() {
+    if (writeDraftFile())
+        emit draftWritten();
+
     if (!m_modified || !m_document)
         return;
     m_drafts.insert(draftKey(), currentDocumentText());
@@ -335,6 +339,22 @@ void Backend::persistDraft() {
 
 void Backend::discardRecovery() {
     clearRecovery();
+}
+
+void Backend::closeFile() {
+    const QStringList watched = m_fileWatcher.files();
+    if (!watched.isEmpty())
+        m_fileWatcher.removePaths(watched);
+
+    m_drafts.remove(m_fileUrl.toString());
+    setFileUrl(QUrl());
+    m_lastKnownFileContents.clear();
+    m_hasKnownFileContents = false;
+    loadDocumentText(QString());
+    setModified(false);
+    setStatus(QString());
+    emit draftsChanged();
+    writeRecovery();
 }
 
 void Backend::reloadFromDisk() {
@@ -1056,8 +1076,10 @@ void Backend::saveTo(const QUrl &url) {
     // The first save of a note the app created as untitled.md names the file
     // after its first line. Only while the file is still empty on disk: a note
     // you called untitled yourself keeps the name you gave it.
-    const bool namesItself = url == m_fileUrl && m_hasKnownFileContents
-        && m_lastKnownFileContents.isEmpty() && isPlaceholderName(targetName);
+    const bool namesItself = url == m_fileUrl
+        && (VaultModel::isDraftPath(url.toLocalFile())
+            || (m_hasKnownFileContents && m_lastKnownFileContents.isEmpty()
+                && isPlaceholderName(targetName)));
 
     QSaveFile file(url.toLocalFile());
     if (!file.open(QIODevice::WriteOnly)) {
@@ -1114,6 +1136,9 @@ QString Backend::recoveryPath() const {
 }
 
 void Backend::writeRecovery() {
+    // The same beat writes the draft's own file, so a crash leaves the text in
+    // two places and the sidebar can read a title off the second.
+    writeDraftFile();
     if (!m_modified && m_drafts.isEmpty()) {
         QFile::remove(recoveryPath());
         return;
@@ -1277,8 +1302,18 @@ void Backend::watchOmarchyTheme() {
 }
 
 QUrl Backend::suggestedSaveUrl() const {
-    if (m_fileUrl.isLocalFile())
+    if (m_fileUrl.isLocalFile()) {
+        // A draft has no name worth proposing. Offer what it would be called,
+        // in the folder it would land in.
+        if (currentIsUnnamed() && !m_currentTitle.isEmpty()) {
+            const QString path = m_fileUrl.toLocalFile();
+            const QString owner = VaultModel::folderForDraft(path);
+            const QDir directory = owner.isEmpty() ? QFileInfo(path).dir() : QDir(owner);
+            return QUrl::fromLocalFile(
+                directory.filePath(suggestedFileName(m_currentTitle)));
+        }
         return m_fileUrl;
+    }
 
     const QString savedDirectory = QSettings().value(lastSaveDirectorySetting).toString();
     const QDir directory = savedDirectory.isEmpty() || !QDir(savedDirectory).exists()
@@ -1414,11 +1449,46 @@ bool Backend::isPlaceholderName(const QString &fileName) {
     return placeholder.match(fileName).hasMatch();
 }
 
+bool Backend::currentIsUnnamed() const {
+    if (!m_fileUrl.isLocalFile())
+        return false;
+    const QString path = m_fileUrl.toLocalFile();
+    return VaultModel::isDraftPath(path)
+        || isPlaceholderName(QFileInfo(path).fileName());
+}
+
 QString Backend::placeholderTitle() const {
-    if (!m_fileUrl.isLocalFile()
-            || !isPlaceholderName(QFileInfo(m_fileUrl.toLocalFile()).fileName()))
-        return {};
-    return m_currentTitle;
+    return currentIsUnnamed() ? m_currentTitle : QString();
+}
+
+// A draft is the app's own file, in its own folder, so it is written as it is
+// typed. That is what lets the sidebar keep calling it by its first line after
+// you have moved on to another note.
+bool Backend::writeDraftFile() {
+    if (!m_fileUrl.isLocalFile() || !VaultModel::isDraftPath(m_fileUrl.toLocalFile()))
+        return false;
+
+    QSaveFile file(m_fileUrl.toLocalFile());
+    if (!file.open(QIODevice::WriteOnly))
+        return false;
+    const QByteArray contents =
+        encodeFileContents(currentDocumentText(), m_lineEnding, m_hasByteOrderMark);
+    file.write(contents);
+
+    // The open file is watched, and QSaveFile commits by replacing it. Without
+    // dropping the watch first, the app reports its own autosave as somebody
+    // else editing the note.
+    const QStringList watched = m_fileWatcher.files();
+    if (!watched.isEmpty())
+        m_fileWatcher.removePaths(watched);
+    if (!file.commit()) {
+        watchCurrentFile();
+        return false;
+    }
+    m_lastKnownFileContents = contents;
+    m_hasKnownFileContents = true;
+    watchCurrentFile();
+    return true;
 }
 
 void Backend::updateCurrentTitle(const QString &text) {
@@ -1450,13 +1520,16 @@ QUrl Backend::renameToTitle(const QUrl &url, const QString &text) {
         return url;
 
     const QFileInfo info(url.toLocalFile());
-    const QDir directory = info.dir();
+    // A draft leaves the drafts folder for the one it belongs to. Anything
+    // else keeps the folder it is already in.
+    const QString owner = VaultModel::folderForDraft(info.absoluteFilePath());
+    const QDir directory = owner.isEmpty() ? info.dir() : QDir(owner);
     QString name = stem + QStringLiteral(".md");
     for (int suffix = 2; directory.exists(name); ++suffix)
         name = QStringLiteral("%1-%2.md").arg(stem).arg(suffix);
-    if (name == info.fileName())
-        return url;
 
+    if (name == info.fileName() && directory.canonicalPath() == info.dir().canonicalPath())
+        return url;
     if (!QFile::rename(info.absoluteFilePath(), directory.filePath(name)))
         return url;
 
