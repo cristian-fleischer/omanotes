@@ -4,7 +4,7 @@ A Markdown notes app for Linux: an editor that styles Markdown inline as you
 type, and a sidebar listing a folder of `.md` files. No GTK, no Chromium, no
 browser engine.
 
-Lean and quick on purpose. One 987 KB binary, nothing at runtime outside Qt 6,
+Lean and quick on purpose. One 871 KB binary, nothing at runtime outside Qt 6,
 and a note on screen in well under half a second: 0.26 s for a short note and
 0.40 s for a 62 KB one, wall clock from exec to the window. The numbers are
 measured, and there is a [table of them](#footprint) further down.
@@ -207,8 +207,8 @@ wall-clock from exec to the window on screen, best of five.
 
 | | Omanotes | omawrite |
 | --- | --- | --- |
-| Binary | 987 KB | 572 KB |
-| Installed package | 993 KB | 565 KB |
+| Binary | 871 KB | 572 KB |
+| Installed package | 877 KB | 565 KB |
 | Window on screen, short note | 0.26 s | 0.21 s |
 | Window on screen, 62 KB note | 0.40 s | 0.26 s |
 | PSS, short note idle | 86 MB | 71 MB |
@@ -218,9 +218,10 @@ wall-clock from exec to the window on screen, best of five.
 200 KB of the binary is the bundled font, compressed, and it comes from
 upstream. Of the code, measured before link-time optimisation folds it
 together: 379 KB is Lexilla's nine lexers, 333 KB this fork's own, and 170 KB
-upstream's editor. Compressing the resources and building with link-time
-optimisation and section garbage collection are worth about 300 KB between
-them; both are set in `omanotes.pro` with the reasoning.
+upstream's editor. Compressing the resources, link-time optimisation with section garbage
+collection, and building Lexilla for size rather than speed are worth about
+450 KB between them. All three are set in `omanotes.pro` and `lexilla.pri`
+with the reasoning.
 
 Most of the memory is neither app: 38 MB of the 118 MB is the Mesa GL stack the
 scene graph pulls in, which `QT_QUICK_BACKEND=software` removes at the cost of
