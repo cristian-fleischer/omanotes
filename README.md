@@ -105,6 +105,13 @@ from the folder icon in the sidebar footer; the default is `$HOME/Notes`.
 The filter matches the path as you type, and a moment later also what is written
 inside the notes, using ripgrep if it is installed and grep otherwise.
 
+A new note is created as `untitled.md` because there is nothing to call it yet.
+The sidebar labels it with its first line as soon as you type one, and the first
+save renames the file to match: `# Meeting notes` becomes `Meeting notes.md`.
+Only that first save, and only while the file is still empty, so a note you
+called untitled yourself keeps the name you gave it, and renaming is never
+something a later save does behind your back.
+
 Notes with unsaved changes are marked with a dot, and a draft that has no file
 behind it yet gets a row of its own at the top.
 
@@ -187,8 +194,8 @@ wall-clock from exec to the window on screen, best of five.
 
 | | Omanotes | omawrite |
 | --- | --- | --- |
-| Binary | 979 KB | 572 KB |
-| Installed package | 985 KB | 565 KB |
+| Binary | 987 KB | 572 KB |
+| Installed package | 993 KB | 565 KB |
 | Window on screen, short note | 0.26 s | 0.21 s |
 | Window on screen, 62 KB note | 0.40 s | 0.26 s |
 | PSS, short note idle | 86 MB | 71 MB |

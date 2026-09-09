@@ -20,6 +20,9 @@ Rectangle {
     property bool documentModified: false
     // Those changes belong to no file at all.
     property bool hasUntitledDraft: false
+    // What to call the open note while its file is still untitled.md, so a new
+    // note is labelled by what you typed before you get round to saving it.
+    property string placeholderTitle: ""
 
     readonly property int minimumWidth: 180
     readonly property int maximumWidth: 420
@@ -316,7 +319,8 @@ Rectangle {
 
                         Text {
                             width: parent.width
-                            text: title
+                            text: isCurrent && sidebar.placeholderTitle.length > 0
+                                ? sidebar.placeholderTitle : title
                             color: isDirectory ? sidebar.mutedColor : sidebar.textColor
                             elide: Text.ElideRight
                             // A folder sits a step above the notes under it.

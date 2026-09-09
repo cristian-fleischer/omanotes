@@ -445,6 +445,7 @@ bool Backend::editorTextChanged() {
     }
 
     scheduleWordCount();
+    updateCurrentTitle(text);
     setModified(true);
     setStatus(QStringLiteral("Unsaved"));
     scheduleRecovery();
@@ -1013,6 +1014,7 @@ void Backend::loadDocumentText(const QString &text) {
     applyDocumentTypography();
     m_wordCountTimer.stop();
     setWordCount(countWords(text));
+    updateCurrentTitle(text);
     emit documentLoaded();
 }
 
@@ -1021,6 +1023,7 @@ void Backend::setFileUrl(const QUrl &url) {
         return;
 
     m_fileUrl = url;
+    emit placeholderTitleChanged();
     emit fileUrlChanged();
     watchCurrentFile();
 }
@@ -1049,6 +1052,13 @@ void Backend::saveTo(const QUrl &url) {
     }
 
     const QString targetName = QFileInfo(url.toLocalFile()).fileName();
+
+    // The first save of a note the app created as untitled.md names the file
+    // after its first line. Only while the file is still empty on disk: a note
+    // you called untitled yourself keeps the name you gave it.
+    const bool namesItself = url == m_fileUrl && m_hasKnownFileContents
+        && m_lastKnownFileContents.isEmpty() && isPlaceholderName(targetName);
+
     QSaveFile file(url.toLocalFile());
     if (!file.open(QIODevice::WriteOnly)) {
         m_closeAfterSave = false;
@@ -1056,8 +1066,8 @@ void Backend::saveTo(const QUrl &url) {
         return;
     }
 
-    const QByteArray contents =
-        encodeFileContents(currentDocumentText(), m_lineEnding, m_hasByteOrderMark);
+    const QString text = currentDocumentText();
+    const QByteArray contents = encodeFileContents(text, m_lineEnding, m_hasByteOrderMark);
     file.write(contents);
 
     // QSaveFile commits by replacing the target. Stop watching the old inode
@@ -1077,15 +1087,16 @@ void Backend::saveTo(const QUrl &url) {
 
     const bool shouldClose = m_closeAfterSave;
     m_closeAfterSave = false;
+    const QUrl saved = namesItself ? renameToTitle(url, text) : url;
     m_lastKnownFileContents = contents;
     m_hasKnownFileContents = true;
-    setFileUrl(url);
+    setFileUrl(saved);
     watchCurrentFile();
     QSettings().setValue(lastSaveDirectorySetting,
-                         QFileInfo(url.toLocalFile()).absolutePath());
+                         QFileInfo(saved.toLocalFile()).absolutePath());
     setModified(false);
     setStatus(QStringLiteral("Saved %1").arg(fileName()));
-    m_drafts.remove(url.toString());
+    m_drafts.remove(saved.toString());
     writeRecovery();
     emit draftsChanged();
     emit saveSucceeded();
@@ -1354,16 +1365,103 @@ int Backend::countWords(const QString &text) {
     return count;
 }
 
+QString Backend::titleFromText(const QString &text) {
+    // Scans to the first line with anything on it and stops, so this costs the
+    // same on a 60 KB note as on a one-liner.
+    QStringView line;
+    for (qsizetype start = 0; start < text.size();) {
+        qsizetype end = text.indexOf(QLatin1Char('\n'), start);
+        if (end < 0)
+            end = text.size();
+        const QStringView candidate = QStringView(text).mid(start, end - start).trimmed();
+        if (!candidate.isEmpty()) {
+            line = candidate;
+            break;
+        }
+        start = end + 1;
+    }
+    if (line.isEmpty())
+        return {};
+
+    // A title is what the line says, not how it is marked up: drop the quote,
+    // heading, list and task marks in front of it, and any emphasis wrapped
+    // around the whole of it.
+    static const QRegularExpression marks(QStringLiteral(
+        "^(?:>\\s*)*(?:#{1,6}\\s+|[-*+]\\s+|\\d+[.)]\\s+)?(?:\\[[ xX]\\]\\s+)?"));
+    static const QRegularExpression closingHashes(QStringLiteral("\\s+#+$"));
+    static const QRegularExpression unsafe(QStringLiteral("[/\\x00-\\x1f\\x7f]"));
+    static const QRegularExpression whitespaceRuns(QStringLiteral("\\s+"));
+
+    QString title = line.toString();
+    title.remove(marks);
+    title.remove(closingHashes);
+    while (!title.isEmpty() && QStringLiteral("*_`").contains(title.at(0)))
+        title.remove(0, 1);
+    while (!title.isEmpty() && QStringLiteral("*_`").contains(title.at(title.size() - 1)))
+        title.chop(1);
+    // Whitespace first: a tab inside a title is a space, not a stray byte.
+    title.replace(whitespaceRuns, QStringLiteral(" "));
+    title.replace(unsafe, QStringLiteral("-"));
+    title = title.left(64).trimmed();
+    if (title == QStringLiteral(".") || title == QStringLiteral(".."))
+        return {};
+    return title;
+}
+
+bool Backend::isPlaceholderName(const QString &fileName) {
+    static const QRegularExpression placeholder(
+        QStringLiteral("^untitled(?:-\\d+)?\\.md$"), QRegularExpression::CaseInsensitiveOption);
+    return placeholder.match(fileName).hasMatch();
+}
+
+QString Backend::placeholderTitle() const {
+    if (!m_fileUrl.isLocalFile()
+            || !isPlaceholderName(QFileInfo(m_fileUrl.toLocalFile()).fileName()))
+        return {};
+    return m_currentTitle;
+}
+
+void Backend::updateCurrentTitle(const QString &text) {
+    const QString title = titleFromText(text);
+    if (title == m_currentTitle)
+        return;
+    m_currentTitle = title;
+    emit placeholderTitleChanged();
+}
+
 QString Backend::suggestedFileName(const QString &text) {
-    QString name = text.section(QLatin1Char('\n'), 0, 0).trimmed();
-    name.replace(QRegularExpression(QStringLiteral("[/\\x00-\\x1f\\x7f]")),
-                 QStringLiteral("-"));
-    name = name.left(120).trimmed();
-    if (name.isEmpty() || name == QStringLiteral(".") || name == QStringLiteral(".."))
+    QString name = titleFromText(text);
+    if (name.isEmpty())
         name = QStringLiteral("Untitled");
     if (!name.endsWith(QStringLiteral(".md"), Qt::CaseInsensitive))
         name += QStringLiteral(".md");
     return name;
+}
+
+QUrl Backend::renameToTitle(const QUrl &url, const QString &text) {
+    QString stem = titleFromText(text);
+    // A leading dot would hide the note, and the vault skips dotfiles.
+    while (stem.startsWith(QLatin1Char('.')))
+        stem.remove(0, 1);
+    if (stem.endsWith(QStringLiteral(".md"), Qt::CaseInsensitive))
+        stem.chop(3);
+    stem = stem.trimmed();
+    if (stem.isEmpty())
+        return url;
+
+    const QFileInfo info(url.toLocalFile());
+    const QDir directory = info.dir();
+    QString name = stem + QStringLiteral(".md");
+    for (int suffix = 2; directory.exists(name); ++suffix)
+        name = QStringLiteral("%1-%2.md").arg(stem).arg(suffix);
+    if (name == info.fileName())
+        return url;
+
+    if (!QFile::rename(info.absoluteFilePath(), directory.filePath(name)))
+        return url;
+
+    m_drafts.remove(url.toString());
+    return QUrl::fromLocalFile(directory.filePath(name));
 }
 
 void Backend::setWordCount(int words) {

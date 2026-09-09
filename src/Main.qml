@@ -585,6 +585,7 @@ ApplicationWindow {
             textColor: win.textColor
             mutedColor: win.mutedColor
             accentColor: backend.themeAccent
+            placeholderTitle: backend.placeholderTitle
             documentModified: backend.modified
             hasUntitledDraft: backend.modified && backend.untitled
 

@@ -40,6 +40,9 @@ class Backend : public QObject {
     // insets the text of code blocks and tables by this much; QML bleeds the
     // slab out by the same amount on all four sides.
     Q_PROPERTY(int blockPadding READ blockPadding CONSTANT)
+    // What the sidebar should call the open note while its file is still the
+    // placeholder a new note is created with. Empty once it has a real name.
+    Q_PROPERTY(QString placeholderTitle READ placeholderTitle NOTIFY placeholderTitleChanged)
 
 public:
     // How the open file separates its lines, and whether it starts with a UTF-8
@@ -78,6 +81,13 @@ public:
                                          bool hasByteOrderMark);
     static QString normalizedLinkUrl(const QString &clipboardText);
     static QString suggestedFileName(const QString &text);
+    // The first line that has anything on it, without the marks that make it a
+    // heading, a list item, a task or a quote, capped at 64 characters. Empty
+    // when the text is blank.
+    static QString titleFromText(const QString &text);
+    // A name `VaultModel::createNote` hands out: untitled.md, untitled-2.md.
+    static bool isPlaceholderName(const QString &fileName);
+    QString placeholderTitle() const;
 
     Q_INVOKABLE void attachDocument(QObject *textDocument);
     Q_INVOKABLE void openDialog();
@@ -155,6 +165,7 @@ signals:
     void saveSucceeded();
     void draftsChanged();
     void externalChangeDetected(bool deleted, bool locallyModified);
+    void placeholderTitleChanged();
     // A note's text has just been put in the buffer, by an open or a restored
     // draft. Setting the text leaves the document cursor at the end, so the
     // view has to be told to go back to the top.
@@ -168,6 +179,11 @@ private:
     void saveTo(const QUrl &url);
     QUrl suggestedSaveUrl() const;
     QString currentDocumentText() const;
+    // The first save of a still-empty placeholder names the file after the
+    // text. Returns the URL to carry on with, which is the old one if there is
+    // nothing to name it or the rename fails.
+    QUrl renameToTitle(const QUrl &url, const QString &text);
+    void updateCurrentTitle(const QString &text);
     QString resolveLocalPath(const QString &token) const;
     void setWordCount(int words);
     void refreshWordCount();
@@ -199,6 +215,7 @@ private:
     QUrl m_fileUrl;
     bool m_modified = false;
     QString m_status;
+    QString m_currentTitle;
     int m_wordCount = 0;
     bool m_darkMode = true;
     qreal m_textScale = 1.0;

@@ -1547,6 +1547,134 @@ private slots:
                  QStringLiteral("Already.md"));
     }
 
+    void readsATitleOffTheFirstLine() {
+        const auto title = [](const char *text) {
+            return Backend::titleFromText(QString::fromUtf8(text));
+        };
+        QCOMPARE(title("# Meeting notes\nBody"), QStringLiteral("Meeting notes"));
+        QCOMPARE(title("\n\n   ### Deep heading ###\n"), QStringLiteral("Deep heading"));
+        QCOMPARE(title("- [ ] buy milk"), QStringLiteral("buy milk"));
+        QCOMPARE(title("2. second thing"), QStringLiteral("second thing"));
+        QCOMPARE(title("> quoted opener"), QStringLiteral("quoted opener"));
+        QCOMPARE(title("**Bold all through**"), QStringLiteral("Bold all through"));
+        QCOMPARE(title("a/b\tc   d"), QStringLiteral("a-b c d"));
+        QCOMPARE(title("   \n\t\n"), QString());
+        QCOMPARE(title(""), QString());
+        // Capped, and the cap does not leave a trailing space behind.
+        const QString long_ = Backend::titleFromText(QString(80, QLatin1Char('x')));
+        QCOMPARE(long_.size(), 64);
+
+        QVERIFY(Backend::isPlaceholderName(QStringLiteral("untitled.md")));
+        QVERIFY(Backend::isPlaceholderName(QStringLiteral("untitled-7.md")));
+        QVERIFY(!Backend::isPlaceholderName(QStringLiteral("untitled notes.md")));
+        QVERIFY(!Backend::isPlaceholderName(QStringLiteral("Meeting notes.md")));
+    }
+
+    // A new note is created as untitled.md because there is nothing to call it
+    // yet. The first save, while the file is still empty, names it.
+    void namesANewNoteOnItsFirstSave() {
+        QTemporaryDir vaultDirectory;
+        QVERIFY(vaultDirectory.isValid());
+        VaultModel vault;
+        vault.setRoot(vaultDirectory.path());
+
+        const QString created = vault.createNote();
+        QCOMPARE(QFileInfo(created).fileName(), QStringLiteral("untitled.md"));
+
+        QQmlEngine engine;
+        QScopedPointer<QObject> editor(createEditor(&engine));
+        QVERIFY(editor);
+        Backend backend;
+        backend.attachDocument(editor->property("textDocument").value<QObject *>());
+        backend.open(QUrl::fromLocalFile(created));
+
+        // Before it is saved the sidebar still has a label for it.
+        QCOMPARE(backend.placeholderTitle(), QString());
+        QVERIFY(QMetaObject::invokeMethod(editor.data(), "insert", Q_ARG(int, 0),
+                                          Q_ARG(QString, QStringLiteral("# Meeting notes\nBody"))));
+        backend.editorTextChanged();
+        QCOMPARE(backend.placeholderTitle(), QStringLiteral("Meeting notes"));
+
+        backend.save();
+        const QString renamed = vaultDirectory.filePath(QStringLiteral("Meeting notes.md"));
+        QCOMPARE(backend.fileUrl(), QUrl::fromLocalFile(renamed));
+        QVERIFY(QFile::exists(renamed));
+        QVERIFY(!QFile::exists(created));
+        QVERIFY(!backend.modified());
+        QVERIFY(backend.draftPaths().isEmpty());
+        // Named, so the sidebar goes back to using the file name.
+        QCOMPARE(backend.placeholderTitle(), QString());
+
+        QFile saved(renamed);
+        QVERIFY(saved.open(QIODevice::ReadOnly));
+        QCOMPARE(saved.readAll(), QByteArray("# Meeting notes\nBody"));
+        saved.close();
+
+        // A second save keeps the name, whatever the first line says now.
+        QVERIFY(QMetaObject::invokeMethod(editor.data(), "insert", Q_ARG(int, 0),
+                                          Q_ARG(QString, QStringLiteral("# Something else\n"))));
+        backend.editorTextChanged();
+        backend.save();
+        QCOMPARE(backend.fileUrl(), QUrl::fromLocalFile(renamed));
+    }
+
+    void leavesANoteYouNamedUntitledAlone() {
+        QTemporaryDir vaultDirectory;
+        QVERIFY(vaultDirectory.isValid());
+        const QString path = vaultDirectory.filePath(QStringLiteral("untitled.md"));
+        QFile seed(path);
+        QVERIFY(seed.open(QIODevice::WriteOnly));
+        seed.write("# Deliberately untitled\n");
+        seed.close();
+
+        QQmlEngine engine;
+        QScopedPointer<QObject> editor(createEditor(&engine));
+        QVERIFY(editor);
+        Backend backend;
+        backend.attachDocument(editor->property("textDocument").value<QObject *>());
+        backend.open(QUrl::fromLocalFile(path));
+        QVERIFY(QMetaObject::invokeMethod(editor.data(), "insert", Q_ARG(int, 0),
+                                          Q_ARG(QString, QStringLiteral("more "))));
+        backend.editorTextChanged();
+        backend.save();
+
+        // The file had content of its own, so the name was a choice, not a
+        // placeholder waiting to be filled in.
+        QCOMPARE(backend.fileUrl(), QUrl::fromLocalFile(path));
+        QVERIFY(QFile::exists(path));
+    }
+
+    void doesNotOverwriteANoteWithTheSameTitle() {
+        QTemporaryDir vaultDirectory;
+        QVERIFY(vaultDirectory.isValid());
+        const QString taken = vaultDirectory.filePath(QStringLiteral("Standup.md"));
+        QFile occupant(taken);
+        QVERIFY(occupant.open(QIODevice::WriteOnly));
+        occupant.write("mine\n");
+        occupant.close();
+
+        VaultModel vault;
+        vault.setRoot(vaultDirectory.path());
+        const QString created = vault.createNote();
+
+        QQmlEngine engine;
+        QScopedPointer<QObject> editor(createEditor(&engine));
+        QVERIFY(editor);
+        Backend backend;
+        backend.attachDocument(editor->property("textDocument").value<QObject *>());
+        backend.open(QUrl::fromLocalFile(created));
+        QVERIFY(QMetaObject::invokeMethod(editor.data(), "insert", Q_ARG(int, 0),
+                                          Q_ARG(QString, QStringLiteral("# Standup"))));
+        backend.editorTextChanged();
+        backend.save();
+
+        QCOMPARE(backend.fileUrl(),
+                 QUrl::fromLocalFile(vaultDirectory.filePath(QStringLiteral("Standup-2.md"))));
+        QFile untouched(taken);
+        QVERIFY(untouched.open(QIODevice::ReadOnly));
+        QCOMPARE(untouched.readAll(), QByteArray("mine\n"));
+    }
+
     void findsInlineMarkdownRanges() {
         const auto markup = MarkdownHighlighter::inlineMarkup(
             QStringLiteral("**bold** and *italic* and [site](https://example.com)"));
