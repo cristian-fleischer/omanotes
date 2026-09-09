@@ -1636,6 +1636,48 @@ private slots:
     // Dragging a note onto a folder files it there. The rules for what can be
     // picked up and where it can land are the model's, so they can be tested
     // without an event loop full of synthetic mouse moves.
+    // Opening a folder used to reset the model, which throws every delegate
+    // away and repaints every folder icon in the list. It has to say what
+    // moved instead.
+    void expandingAFolderMovesOnlyItsRows() {
+        QTemporaryDir vault;
+        QVERIFY(vault.isValid());
+        QVERIFY(writeNote(vault.path(), QStringLiteral("Root.md")));
+        QVERIFY(writeNote(vault.path(), QStringLiteral("projects/Beta.md")));
+        QVERIFY(writeNote(vault.path(), QStringLiteral("projects/deep/Gamma.md")));
+
+        VaultModel model;
+        model.setRoot(vault.path());
+        const int projectsRow = 0;
+        QCOMPARE(model.titleAt(projectsRow), QStringLiteral("projects"));
+
+        QSignalSpy reset(&model, &QAbstractItemModel::modelReset);
+        QSignalSpy removed(&model, &QAbstractItemModel::rowsRemoved);
+        QSignalSpy inserted(&model, &QAbstractItemModel::rowsInserted);
+
+        const int before = model.rowCount();
+        model.setExpanded(projectsRow, false);
+        QCOMPARE(reset.count(), 0);
+        QCOMPARE(removed.count(), 1);
+        // Everything under it goes, and nothing else moves.
+        QCOMPARE(removed.first().at(1).toInt(), projectsRow + 1);
+        QCOMPARE(model.rowCount(), before - 3);
+        QCOMPARE(model.titleAt(projectsRow), QStringLiteral("projects"));
+
+        model.setExpanded(projectsRow, true);
+        QCOMPARE(reset.count(), 0);
+        QCOMPARE(inserted.count(), 1);
+        QCOMPARE(inserted.first().at(1).toInt(), projectsRow + 1);
+        QCOMPARE(model.rowCount(), before);
+
+        // A note appearing is one insert too, not a reset of the list.
+        QVERIFY(writeNote(vault.path(), QStringLiteral("Zeta.md")));
+        model.refresh();
+        QCOMPARE(reset.count(), 0);
+        QCOMPARE(inserted.count(), 2);
+        QCOMPARE(model.rowCount(), before + 1);
+    }
+
     void vaultModelDropRules() {
         QTemporaryDir vault;
         QVERIFY(vault.isValid());

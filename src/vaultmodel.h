@@ -167,6 +167,8 @@ private:
                          const QHash<QString, QList<int>> &files,
                          const QHash<QString, QStringList> &subdirectories);
     void resetRows();
+    // Rebuilds the visible rows and tells the view only what moved.
+    void applyRows();
     bool expandAncestorsOf(const QString &relativeDir);
     void saveCollapsedFolders();
     void rewatch();

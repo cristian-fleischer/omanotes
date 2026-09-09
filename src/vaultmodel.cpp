@@ -381,18 +381,68 @@ int VaultModel::rowForPath(const QString &path) const {
 
 void VaultModel::refresh() {
     m_rescanTimer.stop();
-    beginResetModel();
     scan();
-    rebuildRows();
-    endResetModel();
+    applyRows();
     rewatch();
-    emit countChanged();
 }
 
 void VaultModel::resetRows() {
-    beginResetModel();
+    applyRows();
+}
+
+// Opening one folder used to reset the model, which throws every delegate away
+// and redraws every folder icon in the list. Work out what actually moved and
+// say only that: expanding or collapsing is one run of rows appearing or
+// disappearing directly under the row you clicked.
+void VaultModel::applyRows() {
+    const QList<Node> previous = m_rows;
     rebuildRows();
-    endResetModel();
+    QList<Node> updated = m_rows;
+
+    const auto same = [](const Node &a, const Node &b) {
+        return a.directory == b.directory && a.header == b.header
+            && a.draft == b.draft && a.depth == b.depth
+            && a.relativePath == b.relativePath && a.title == b.title;
+    };
+
+    int prefix = 0;
+    while (prefix < previous.size() && prefix < updated.size()
+           && same(previous.at(prefix), updated.at(prefix)))
+        ++prefix;
+
+    int suffix = 0;
+    while (suffix < previous.size() - prefix && suffix < updated.size() - prefix
+           && same(previous.at(previous.size() - 1 - suffix),
+                   updated.at(updated.size() - 1 - suffix)))
+        ++suffix;
+
+    const int removed = previous.size() - prefix - suffix;
+    const int inserted = updated.size() - prefix - suffix;
+
+    if (removed > 0 && inserted > 0) {
+        // Rows changed rather than only appearing or disappearing, which a
+        // rescan can do. Nothing to be gained from a diff there.
+        beginResetModel();
+        endResetModel();
+    } else if (inserted > 0) {
+        m_rows = previous;
+        beginInsertRows(QModelIndex(), prefix, prefix + inserted - 1);
+        m_rows = updated;
+        endInsertRows();
+    } else if (removed > 0) {
+        m_rows = previous;
+        beginRemoveRows(QModelIndex(), prefix, prefix + removed - 1);
+        m_rows = updated;
+        endRemoveRows();
+    }
+
+    // A folder that stayed put still opened or closed, and a note that stayed
+    // put may have gained or lost its dot.
+    if (!m_rows.isEmpty()) {
+        emit dataChanged(index(0), index(int(m_rows.size()) - 1),
+                         QList<int>{IsExpandedRole, IsCurrentRole, HasDraftRole,
+                                    TitleRole, MatchesContentRole});
+    }
     emit countChanged();
 }
 
