@@ -701,9 +701,13 @@ QVariantList Backend::tableRegions() const {
             for (int column : std::as_const(shared))
                 columns.append(column);
         }
+        // The rule where the separator row was belongs to the grid. Drawn on
+        // its own across a table with no column rules it is a line sticking
+        // out past both ends of the text, which is the half grid again.
+        const bool drawsGrid = !columns.isEmpty();
         regions.append(QVariantMap{{QStringLiteral("start"), first.position()},
                                    {QStringLiteral("end"), previous.position()},
-                                   {QStringLiteral("separator"), editing ? -1 : separator},
+                                   {QStringLiteral("separator"), drawsGrid ? separator : -1},
                                    {QStringLiteral("editing"), editing},
                                    {QStringLiteral("columns"), columns}});
         first = QTextBlock();

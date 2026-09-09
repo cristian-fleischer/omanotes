@@ -179,9 +179,12 @@ private slots:
         QVERIFY(aligned.value(QStringLiteral("separator")).toInt() >= 0);
 
         // Ragged source shares only the columns that happen to line up, so
-        // nothing is drawn through a pipe that is not there.
+        // nothing is drawn through a pipe that is not there, and with no
+        // column rules the separator rule goes too rather than hanging across
+        // the block on its own.
         const QVariantMap ragged = regions.at(1).toMap();
-        QVERIFY(ragged.value(QStringLiteral("columns")).toList().size() < 3);
+        QVERIFY(ragged.value(QStringLiteral("columns")).toList().isEmpty());
+        QCOMPARE(ragged.value(QStringLiteral("separator")).toInt(), -1);
     }
 
     void markersRevealWhereTheCaretIs() {
