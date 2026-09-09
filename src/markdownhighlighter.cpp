@@ -784,20 +784,36 @@ void MarkdownHighlighter::refreshSetextHeadings() {
 }
 
 void MarkdownHighlighter::highlightInline(const QString &text) {
+    const QList<InlineMarkup> markup = inlineMarkup(text);
+
+    // The heading goes on first and everything else merges over it. The other
+    // way round, a heading made of nothing but `code` came out as a plain
+    // heading: its format was written over the code span's.
+    for (const InlineMarkup &item : markup) {
+        if (item.kind == InlineKind::Heading) {
+            setFormat(item.content.start, item.content.length,
+                      m_headingFormats[qBound(1, item.level, 6) - 1]);
+        }
+    }
+
     if (text.contains(QLatin1Char('`'))) {
         static const QRegularExpression codeRe(QStringLiteral("`([^`]+)`"));
         QRegularExpressionMatchIterator codeMatches = codeRe.globalMatch(text);
         while (codeMatches.hasNext()) {
             const QRegularExpressionMatch match = codeMatches.next();
-            setFormat(match.capturedStart(0), match.capturedLength(0), m_codeFormat);
+            const int start = int(match.capturedStart(0));
+            // Merge, so code in a heading keeps the heading's size.
+            QTextCharFormat merged = format(start);
+            merged.setFontFamilies(m_codeFormat.fontFamilies().toStringList());
+            merged.setForeground(m_codeFormat.foreground());
+            merged.setBackground(m_codeFormat.background());
+            setFormat(start, int(match.capturedLength(0)), merged);
         }
     }
 
-    const QList<InlineMarkup> markup = inlineMarkup(text);
     for (const InlineMarkup &item : markup) {
         if (item.kind == InlineKind::Heading) {
-            setFormat(item.content.start, item.content.length,
-                      m_headingFormats[qBound(1, item.level, 6) - 1]);
+            // Already applied above.
         } else {
             // Merge rather than replace, so `**bold**` inside a heading keeps
             // the heading's size and inline code keeps its background.
@@ -854,6 +870,25 @@ MarkdownHighlighter::inlineMarkup(const QString &text, bool insideFencedCode) {
         return Span{int(match.capturedStart(group)), int(match.capturedLength(group))};
     };
 
+    // What is inside backticks is not Markdown. Without this, the underscores
+    // of `contact_id` and `test_id` on one line pair up across the two spans
+    // and italicise everything between them.
+    QList<Span> code;
+    if (text.contains(QLatin1Char('`'))) {
+        static const QRegularExpression codeRe(QStringLiteral("`([^`]+)`"));
+        QRegularExpressionMatchIterator codeMatches = codeRe.globalMatch(text);
+        while (codeMatches.hasNext())
+            code.append(span(codeMatches.next(), 0));
+    }
+    const auto insideCode = [&code](const Span &candidate) {
+        for (const Span &taken : code) {
+            if (candidate.start < taken.start + taken.length
+                    && taken.start < candidate.start + candidate.length)
+                return true;
+        }
+        return false;
+    };
+
     // An ATX heading's `#` run and the space after it are hidden, not dimmed,
     // so the line reads as a heading rather than as its own syntax.
     static const QRegularExpression headingRe(QStringLiteral("^(#{1,6})(\\s+)(.*)$"));
@@ -869,15 +904,6 @@ MarkdownHighlighter::inlineMarkup(const QString &text, bool insideFencedCode) {
     // italic patterns: `**` would otherwise claim the outer pair and leave the
     // third asterisk sitting in the text.
     QList<Span> emphasised;
-    static const QRegularExpression boldItalicRe(QStringLiteral("(\\*\\*\\*|___)(.+?)(\\1)"));
-    QRegularExpressionMatchIterator boldItalicMatches = boldItalicRe.globalMatch(text);
-    while (boldItalicMatches.hasNext()) {
-        const QRegularExpressionMatch match = boldItalicMatches.next();
-        emphasised.append(span(match, 0));
-        markup.append({InlineKind::BoldItalic, span(match, 2),
-                       {span(match, 1), span(match, 3)}});
-    }
-
     const auto insideEmphasis = [&emphasised](const Span &candidate) {
         for (const Span &taken : emphasised) {
             if (candidate.start < taken.start + taken.length
@@ -887,34 +913,50 @@ MarkdownHighlighter::inlineMarkup(const QString &text, bool insideFencedCode) {
         return false;
     };
 
-    static const QRegularExpression boldRe(QStringLiteral("(\\*\\*|__)(.+?)(\\1)"));
-    QRegularExpressionMatchIterator boldMatches = boldRe.globalMatch(text);
-    while (boldMatches.hasNext()) {
-        const QRegularExpressionMatch match = boldMatches.next();
-        if (insideEmphasis(span(match, 0)))
-            continue;
-        markup.append({InlineKind::Bold, span(match, 2),
-                       {span(match, 1), span(match, 3)}});
-    }
+    // One pattern per marker, because the underscore forms carry a rule the
+    // asterisk forms do not: an underscore inside a word is a character, not a
+    // marker, so snake_case_names stay as written. CommonMark says the same.
+    const auto addEmphasis = [&](const QRegularExpression &re, int markerLength,
+                                 InlineKind kind) {
+        QRegularExpressionMatchIterator matches = re.globalMatch(text);
+        while (matches.hasNext()) {
+            const QRegularExpressionMatch match = matches.next();
+            const Span whole = span(match, 0);
+            if (insideEmphasis(whole) || insideCode(whole))
+                continue;
+            if (kind == InlineKind::BoldItalic)
+                emphasised.append(whole);
+            markup.append({kind, span(match, 1),
+                           {{whole.start, markerLength},
+                            {whole.start + whole.length - markerLength, markerLength}}});
+        }
+    };
 
-    static const QRegularExpression italicRe(
-        QStringLiteral("(?<!\\*)\\*([^*\\n]+)\\*(?!\\*)|(?<!_)_([^_\\n]+)_(?!_)"));
-    QRegularExpressionMatchIterator italicMatches = italicRe.globalMatch(text);
-    while (italicMatches.hasNext()) {
-        const QRegularExpressionMatch match = italicMatches.next();
-        const Span whole = span(match, 0);
-        if (insideEmphasis(whole))
-            continue;
-        const int contentIndex = match.capturedStart(1) >= 0 ? 1 : 2;
-        markup.append({InlineKind::Italic, span(match, contentIndex),
-                       {{whole.start, 1}, {whole.start + whole.length - 1, 1}}});
-    }
+    static const QRegularExpression boldItalicStars(QStringLiteral("\\*\\*\\*(.+?)\\*\\*\\*"));
+    static const QRegularExpression boldItalicUnders(
+        QStringLiteral("(?<!\\w)___(.+?)___(?!\\w)"));
+    addEmphasis(boldItalicStars, 3, InlineKind::BoldItalic);
+    addEmphasis(boldItalicUnders, 3, InlineKind::BoldItalic);
+
+    static const QRegularExpression boldStars(QStringLiteral("\\*\\*(.+?)\\*\\*"));
+    static const QRegularExpression boldUnders(QStringLiteral("(?<!\\w)__(.+?)__(?!\\w)"));
+    addEmphasis(boldStars, 2, InlineKind::Bold);
+    addEmphasis(boldUnders, 2, InlineKind::Bold);
+
+    static const QRegularExpression italicStars(
+        QStringLiteral("(?<!\\*)\\*([^*\\n]+)\\*(?!\\*)"));
+    static const QRegularExpression italicUnders(
+        QStringLiteral("(?<!\\w)_([^_\\n]+)_(?!\\w)"));
+    addEmphasis(italicStars, 1, InlineKind::Italic);
+    addEmphasis(italicUnders, 1, InlineKind::Italic);
 
     static const QRegularExpression strikeRe(QStringLiteral("~~([^~\\n]+)~~"));
     QRegularExpressionMatchIterator strikeMatches = strikeRe.globalMatch(text);
     while (strikeMatches.hasNext()) {
         const QRegularExpressionMatch match = strikeMatches.next();
         const Span whole = span(match, 0);
+        if (insideCode(whole))
+            continue;
         markup.append({InlineKind::Strikethrough, span(match, 1),
                        {{whole.start, 2}, {whole.start + whole.length - 2, 2}}});
     }
@@ -928,6 +970,8 @@ MarkdownHighlighter::inlineMarkup(const QString &text, bool insideFencedCode) {
     while (imageMatches.hasNext()) {
         const QRegularExpressionMatch match = imageMatches.next();
         const Span whole = span(match, 0);
+        if (insideCode(whole))
+            continue;
         const Span content = span(match, 1);
         const int contentEnd = content.start + content.length;
         markup.append({InlineKind::Image, content,
@@ -941,6 +985,8 @@ MarkdownHighlighter::inlineMarkup(const QString &text, bool insideFencedCode) {
     while (linkMatches.hasNext()) {
         const QRegularExpressionMatch match = linkMatches.next();
         const Span whole = span(match, 0);
+        if (insideCode(whole))
+            continue;
         const Span content = span(match, 1);
         const int contentEnd = content.start + content.length;
         markup.append({InlineKind::Link, content,

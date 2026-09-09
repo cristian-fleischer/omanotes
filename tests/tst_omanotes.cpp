@@ -1685,6 +1685,58 @@ private slots:
         QCOMPARE(markup.at(2).markers[0].length, 1);
     }
 
+    // Backticks fence off Markdown. Two code spans on one line used to pair
+    // their underscores across the gap and italicise everything between them.
+    void codeSpansAreNotMarkdown() {
+        const auto kinds = [](const QString &line) {
+            QList<int> found;
+            for (const auto &item : MarkdownHighlighter::inlineMarkup(line))
+                found.append(int(item.kind));
+            return found;
+        };
+        QCOMPARE(kinds(QStringLiteral("### `contact_id` and `test_id`")),
+                 QList<int>{int(MarkdownHighlighter::InlineKind::Heading)});
+        QVERIFY(kinds(QStringLiteral("`a *b* c`")).isEmpty());
+        QVERIFY(kinds(QStringLiteral("`[a](b)`")).isEmpty());
+        QVERIFY(kinds(QStringLiteral("`a ~~b~~ c`")).isEmpty());
+
+        // An underscore inside a word is a character, not a marker.
+        QVERIFY(kinds(QStringLiteral("snake_case_name here")).isEmpty());
+        QVERIFY(kinds(QStringLiteral("call get_user_id() twice")).isEmpty());
+        // Real emphasis still works, both markers.
+        QCOMPARE(kinds(QStringLiteral("an _italic_ word")),
+                 QList<int>{int(MarkdownHighlighter::InlineKind::Italic)});
+        QCOMPARE(kinds(QStringLiteral("an *italic* word")),
+                 QList<int>{int(MarkdownHighlighter::InlineKind::Italic)});
+        QCOMPARE(kinds(QStringLiteral("__bold__ start")),
+                 QList<int>{int(MarkdownHighlighter::InlineKind::Bold)});
+        QCOMPARE(kinds(QStringLiteral("___both___ start")),
+                 QList<int>{int(MarkdownHighlighter::InlineKind::BoldItalic)});
+    }
+
+    // A heading made of nothing but code came out as a plain heading: the
+    // heading format was written over the code span rather than under it.
+    void codeInAHeadingKeepsBoth() {
+        QTextDocument document;
+        document.setDefaultFont(bodyFont());
+        MarkdownHighlighter highlighter(&document);
+        setDocumentText(document, QStringLiteral("### `client_id`\n"
+                                                 "# plain heading\n"
+                                                 "body `code` here"));
+
+        const QTextCharFormat heading = formatAt(document, 1, 3);
+        const QTextCharFormat headingCode = formatAt(document, 0, 5);
+        const QTextCharFormat bodyCode = formatAt(document, 2, 6);
+
+        // The code span carries the code background and the monospace family.
+        QVERIFY(headingCode.background() != heading.background());
+        QCOMPARE(headingCode.background(), bodyCode.background());
+        QCOMPARE(headingCode.fontFamilies().toStringList(),
+                 bodyCode.fontFamilies().toStringList());
+        // And it is still heading-sized, which is larger than code in prose.
+        QVERIFY(headingCode.fontPointSize() > bodyCode.fontPointSize());
+    }
+
     void loadsCurrentOmarchyTheme() {
         QTemporaryDir homeDirectory;
         QVERIFY(homeDirectory.isValid());
