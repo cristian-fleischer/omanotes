@@ -13,7 +13,7 @@ box-drawing diagram](docs/omanotes.png)
 That note is `contrib/showcase.md`. Open it to see what the editor draws over
 plain Markdown.
 
-Fork of [omawrite](https://github.com/omacom/omawrite) by David Heinemeier
+Based on [omawrite](https://github.com/omacom/omawrite) by David Heinemeier
 Hansson, MIT. The editing surface, autosave, atomic writes, crash recovery,
 portal dialogs and theme following all come from there. What Omanotes adds is
 the vault sidebar, the inline Markdown styling, syntax highlighting, tables,
