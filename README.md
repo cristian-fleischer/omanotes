@@ -72,7 +72,7 @@ The buffer is always your Markdown. These are drawn over it, never in it.
 | `[text](url)`, `![alt](src)` | The text, underlined in the accent colour. Ctrl+click opens it. |
 | `` `code` `` | A chip a step brighter than the page, the backticks holding a space of it either side rather than showing. |
 | ` ```lang ` | A slab behind the code, syntax highlighted, the fence rows folded away. |
-| `---` | A rule across the page. |
+| `---`, `***`, `___` | A rule across the page, which goes while the caret is on the line: `***` opens bold italic too. |
 | `* item` | A bullet drawn in the asterisk's own cell. `-` and `+` are left alone. |
 | `- [ ]`, `[ ]` | A checkbox, with or without a list marker. Click it to toggle. |
 | `\| a \| b \|` | A table: slab, bold header, a rule under it, and column rules once the source lines up. |

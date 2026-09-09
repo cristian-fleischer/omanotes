@@ -501,6 +501,51 @@ private slots:
             QVERIFY(!qFuzzyCompare(formatAt(*document, block, 0).fontPointSize(), 1.0));
     }
 
+    // `***` opens bold italic as well as being a thematic break, so a rule
+    // must not be drawn across the page the moment the third asterisk lands.
+    void noRuleUnderTheCaret() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("rules.md"));
+        QFile seed(path);
+        QVERIFY(seed.open(QIODevice::WriteOnly));
+        seed.write("above\n"
+                   "***\n"
+                   "between\n"
+                   "___\n"
+                   "below\n");
+        seed.close();
+
+        QQmlEngine engine;
+        QScopedPointer<QObject> editor(createEditor(&engine));
+        QVERIFY(editor);
+        Backend backend;
+        backend.attachDocument(editor->property("textDocument").value<QObject *>());
+        backend.open(QUrl::fromLocalFile(path));
+        QTextDocument *document =
+            qobject_cast<QQuickTextDocument *>(
+                editor->property("textDocument").value<QObject *>())->textDocument();
+        QVERIFY(document);
+
+        // Both marks make a rule, which is what the notes in a vault already
+        // written expect.
+        backend.setCursorPosition(0);
+        QCOMPARE(backend.thematicBreakPositions().size(), 2);
+
+        // The caret on one shows the source and takes its rule away.
+        backend.setCursorPosition(document->findBlockByNumber(1).position());
+        QCOMPARE(backend.thematicBreakPositions(),
+                 QList<int>{document->findBlockByNumber(3).position()});
+
+        backend.setCursorPosition(document->findBlockByNumber(3).position());
+        QCOMPARE(backend.thematicBreakPositions(),
+                 QList<int>{document->findBlockByNumber(1).position()});
+
+        // Moving off brings it back.
+        backend.setCursorPosition(document->findBlockByNumber(4).position());
+        QCOMPARE(backend.thematicBreakPositions().size(), 2);
+    }
+
     void tableRegionsShareOnlyAlignedColumns() {
         QTemporaryDir directory;
         QVERIFY(directory.isValid());

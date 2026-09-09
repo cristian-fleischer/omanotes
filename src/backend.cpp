@@ -659,7 +659,12 @@ QList<int> Backend::thematicBreakPositions() const {
     if (!m_document)
         return positions;
     for (QTextBlock block = m_document->begin(); block.isValid(); block = block.next()) {
-        if (block.userState() == MarkdownHighlighter::ThematicBreak)
+        // The line being edited shows the marks it was written with, so no rule
+        // is drawn over it. `***` is a thematic break and the opening of
+        // `***bold italic***`, and drawing a line across the page the moment
+        // the third asterisk lands makes typing one alarming.
+        if (block.userState() == MarkdownHighlighter::ThematicBreak
+                && block.blockNumber() != m_activeBlockNumber)
             positions.append(block.position());
     }
     return positions;
