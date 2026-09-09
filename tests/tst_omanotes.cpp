@@ -8,6 +8,7 @@
 #include <QElapsedTimer>
 #include <QFontDatabase>
 #include <QSignalSpy>
+#include <QQuickItem>
 #include <QQuickTextDocument>
 #include <QWindow>
 #include <QQmlComponent>
@@ -220,6 +221,76 @@ private slots:
     // table when the note ends with one. That is not the reader revealing
     // anything, and the grid must not be worked out around it: the note came
     // up with its last table drawn as rules and written out in pipes at once.
+    // The sidebar's half of the drag: a target the rules accept becomes the
+    // drop row, one they refuse does not, and letting go files the note. The
+    // hit test that turns a cursor position into a row is a single indexAt and
+    // is left to the eye.
+    void sidebarDragFilesANote() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        QTemporaryDir vaultDirectory;
+        QVERIFY(vaultDirectory.isValid());
+        QVERIFY(writeNote(vaultDirectory.path(), QStringLiteral("Loose.md")));
+        QVERIFY(writeNote(vaultDirectory.path(), QStringLiteral("projects/Beta.md")));
+
+        Backend backend;
+        VaultModel vault;
+        vault.setRoot(vaultDirectory.path());
+        vault.createNote();
+
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        engine.rootContext()->setContextProperty(QStringLiteral("vault"), &vault);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        QObject *sidebar = window->findChild<QObject *>(QStringLiteral("vaultSidebar"));
+        QVERIFY(sidebar);
+
+        const int looseRow = vault.rowForPath(
+            QDir(vaultDirectory.path()).filePath(QStringLiteral("Loose.md")));
+        QVERIFY(looseRow >= 0);
+        int projectsRow = -1, draftsRow = -1;
+        for (int row = 0; row < vault.rowCount(); ++row) {
+            if (vault.titleAt(row) == QStringLiteral("projects"))
+                projectsRow = row;
+            else if (vault.titleAt(row) == QStringLiteral("Drafts"))
+                draftsRow = row;
+        }
+        QVERIFY(projectsRow >= 0 && draftsRow >= 0);
+
+        sidebar->setProperty("dragRow", looseRow);
+        sidebar->setProperty("dragTitle", QStringLiteral("Loose"));
+
+        // A Drafts row stands for a hidden directory, so it is refused.
+        QVERIFY(QMetaObject::invokeMethod(sidebar, "setDropTarget", Q_ARG(QVariant, draftsRow)));
+        QCOMPARE(sidebar->property("dropRow").toInt(), -2);
+
+        QVERIFY(QMetaObject::invokeMethod(sidebar, "setDropTarget", Q_ARG(QVariant, projectsRow)));
+        QCOMPARE(sidebar->property("dropRow").toInt(), projectsRow);
+
+        QVERIFY(QMetaObject::invokeMethod(sidebar, "finishDrag", Q_ARG(QVariant, true)));
+        QVERIFY(QFile::exists(
+            QDir(vaultDirectory.path()).filePath(QStringLiteral("projects/Loose.md"))));
+        QVERIFY(!QFile::exists(
+            QDir(vaultDirectory.path()).filePath(QStringLiteral("Loose.md"))));
+        QCOMPARE(sidebar->property("dragRow").toInt(), -1);
+        QCOMPARE(sidebar->property("dropRow").toInt(), -1);
+
+        // Letting go over nowhere moves nothing.
+        vault.refresh();
+        const int betaRow = vault.rowForPath(
+            QDir(vaultDirectory.path()).filePath(QStringLiteral("projects/Beta.md")));
+        sidebar->setProperty("dragRow", betaRow);
+        QVERIFY(QMetaObject::invokeMethod(sidebar, "setDropTarget", Q_ARG(QVariant, -2)));
+        QVERIFY(QMetaObject::invokeMethod(sidebar, "finishDrag", Q_ARG(QVariant, true)));
+        QVERIFY(QFile::exists(
+            QDir(vaultDirectory.path()).filePath(QStringLiteral("projects/Beta.md"))));
+    }
+
     void aTableAtTheEndOfANoteIsStillGridded() {
         const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
         QVERIFY(!mainQmlPath.isEmpty());
@@ -1376,6 +1447,65 @@ private slots:
         QVERIFY(!QFile::exists(moved));
         model.refresh();
         QCOMPARE(model.totalCount(), 3);
+    }
+
+    // Dragging a note onto a folder files it there. The rules for what can be
+    // picked up and where it can land are the model's, so they can be tested
+    // without an event loop full of synthetic mouse moves.
+    void vaultModelDropRules() {
+        QTemporaryDir vault;
+        QVERIFY(vault.isValid());
+        QVERIFY(writeNote(vault.path(), QStringLiteral("Root.md")));
+        QVERIFY(writeNote(vault.path(), QStringLiteral("projects/Beta.md")));
+
+        VaultModel model;
+        model.setRoot(vault.path());
+        model.createNote();
+
+        int draftsRow = -1, draftRow = -1, projectsRow = -1, betaRow = -1, rootRow = -1;
+        for (int row = 0; row < model.rowCount(); ++row) {
+            const QString title = model.titleAt(row);
+            if (title == QStringLiteral("Drafts"))
+                draftsRow = row;
+            else if (roleOf(model, row, VaultModel::IsDraftRole).toBool())
+                draftRow = row;
+            else if (title == QStringLiteral("projects"))
+                projectsRow = row;
+            else if (title == QStringLiteral("Beta"))
+                betaRow = row;
+            else if (title == QStringLiteral("Root"))
+                rootRow = row;
+        }
+        QVERIFY(draftsRow >= 0 && draftRow >= 0);
+        QVERIFY(projectsRow >= 0 && betaRow >= 0 && rootRow >= 0);
+
+        // A named note travels. A folder, a section label and a draft do not.
+        QVERIFY(model.canDragAt(rootRow));
+        QVERIFY(model.canDragAt(betaRow));
+        QVERIFY(!model.canDragAt(projectsRow));
+        QVERIFY(!model.canDragAt(draftsRow));
+        QVERIFY(!model.canDragAt(draftRow));
+        QVERIFY(!model.canDragAt(-1));
+
+        // A folder row means itself; a note row means the folder it is in;
+        // past the last row is the vault root.
+        QCOMPARE(model.dropFolderForRow(projectsRow), QStringLiteral("projects"));
+        QCOMPARE(model.dropFolderForRow(betaRow), QStringLiteral("projects"));
+        QCOMPARE(model.dropFolderForRow(rootRow), QString());
+        QCOMPARE(model.dropFolderForRow(-1), QString());
+
+        QVERIFY(model.canDropOnRow(rootRow, projectsRow));
+        QVERIFY(model.canDropOnRow(rootRow, betaRow));
+        QVERIFY(model.canDropOnRow(betaRow, rootRow));
+        QVERIFY(model.canDropOnRow(betaRow, -1));
+
+        // Where it already is is not a move, and neither is a label or the
+        // hidden directory a Drafts row stands for.
+        QVERIFY(!model.canDropOnRow(rootRow, rootRow));
+        QVERIFY(!model.canDropOnRow(rootRow, -1));
+        QVERIFY(!model.canDropOnRow(betaRow, projectsRow));
+        QVERIFY(!model.canDropOnRow(rootRow, draftsRow));
+        QVERIFY(!model.canDropOnRow(draftRow, projectsRow));
     }
 
     void vaultModelCollapsesFolders() {

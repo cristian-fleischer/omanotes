@@ -773,6 +773,41 @@ QString VaultModel::titleAt(int row) const {
     return row >= 0 && row < m_rows.size() ? m_rows.at(row).title : QString();
 }
 
+bool VaultModel::canDragAt(int row) const {
+    if (row < 0 || row >= m_rows.size())
+        return false;
+    const Node &node = m_rows.at(row);
+    // A draft has no name of its own yet, so filing it in the vault would put
+    // an unnamed note among the named ones. Saving it is what files it.
+    return !node.directory && !node.header && !node.draft;
+}
+
+QString VaultModel::dropFolderForRow(int targetRow) const {
+    if (targetRow < 0)
+        return {};
+    if (targetRow >= m_rows.size())
+        return {};
+    const Node &node = m_rows.at(targetRow);
+    return node.directory ? node.relativePath : node.relativeDir;
+}
+
+bool VaultModel::canDropOnRow(int sourceRow, int targetRow) const {
+    if (!canDragAt(sourceRow))
+        return false;
+    // Below the last row is the vault root.
+    if (targetRow >= m_rows.size())
+        return false;
+    if (targetRow >= 0) {
+        const Node &target = m_rows.at(targetRow);
+        // A Drafts row stands for a hidden directory, not a folder you can
+        // file a note into, and a label is not a target at all.
+        if (target.header || target.draftsGroup)
+            return false;
+    }
+    // Where it already is is not a move.
+    return dropFolderForRow(targetRow) != m_rows.at(sourceRow).relativeDir;
+}
+
 QString VaultModel::moveNote(const QString &path, const QString &relativeDir) {
     const QString canonical = QFileInfo(path).canonicalFilePath();
     if (m_canonicalRoot.isEmpty() || canonical.isEmpty()

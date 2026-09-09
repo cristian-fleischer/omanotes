@@ -24,6 +24,15 @@ Rectangle {
     // note is labelled by what you typed before you get round to saving it.
     property string placeholderTitle: ""
 
+    // Dragging a note onto a folder files it there. The row being dragged, the
+    // row under the cursor, and where the label following the cursor sits.
+    // -1 for the target means the empty space below the list, the vault root.
+    property int dragRow: -1
+    property int dropRow: -1
+    property string dragTitle: ""
+    property point dragPoint: Qt.point(0, 0)
+    readonly property bool dragging: dragRow >= 0
+
     readonly property int minimumWidth: 180
     readonly property int maximumWidth: 420
     property int panelWidth: 260
@@ -93,6 +102,75 @@ Rectangle {
         sidebar.vaultModel.setExpanded(row, expanded);
         list.currentIndex = row;
         return true;
+    }
+
+    // The row under the cursor, or -1 for the space past the last one.
+    function rowUnderCursor(sceneX, sceneY) {
+        if (!sidebar.vaultModel)
+            return -1;
+        var local = list.mapFromItem(null, sceneX, sceneY);
+        if (local.y < 0 || local.y > list.height)
+            return -2;
+        return list.indexAt(list.width / 2, local.y + list.contentY);
+    }
+
+    // Where the note would land, or -2 for nowhere. Separate from the hit test
+    // so the rules can be exercised without pixel coordinates.
+    function setDropTarget(row) {
+        sidebar.dropRow = row !== -2 && sidebar.vaultModel
+                          && sidebar.vaultModel.canDropOnRow(sidebar.dragRow, row) ? row : -2;
+        springLoad.restart();
+        autoScroll.running = sidebar.dragging;
+    }
+
+    function updateDrag(sceneX, sceneY) {
+        sidebar.dragPoint = sidebar.mapFromItem(null, sceneX, sceneY);
+        setDropTarget(rowUnderCursor(sceneX, sceneY));
+    }
+
+    function finishDrag(dropped) {
+        springLoad.stop();
+        autoScroll.running = false;
+        if (dropped && sidebar.dragRow >= 0 && sidebar.dropRow !== -2) {
+            sidebar.moveRequested(sidebar.vaultModel.pathAt(sidebar.dragRow),
+                                  sidebar.vaultModel.dropFolderForRow(sidebar.dropRow));
+        }
+        sidebar.dragRow = -1;
+        sidebar.dropRow = -1;
+        sidebar.dragTitle = "";
+    }
+
+    // Hold over a closed folder and it opens, so you can drop inside without
+    // letting go first.
+    Timer {
+        id: springLoad
+        interval: 650
+        onTriggered: {
+            if (!sidebar.dragging || sidebar.dropRow < 0 || !sidebar.vaultModel)
+                return;
+            if (sidebar.vaultModel.isDirectoryAt(sidebar.dropRow))
+                sidebar.vaultModel.setExpanded(sidebar.dropRow, true);
+        }
+    }
+
+    // Near the top or the bottom edge, keep the list moving.
+    Timer {
+        id: autoScroll
+        interval: 16
+        repeat: true
+        onTriggered: {
+            var margin = sidebar.scaledSize(28);
+            var y = sidebar.dragPoint.y - list.y;
+            var step = 0;
+            if (y < margin)
+                step = -Math.max(2, (margin - y) / 3);
+            else if (y > list.height - margin)
+                step = Math.max(2, (y - (list.height - margin)) / 3);
+            if (step === 0)
+                return;
+            list.contentY = Math.max(0, Math.min(list.contentHeight - list.height,
+                                                 list.contentY + step));
+        }
     }
 
     function activateSelection() {
@@ -317,8 +395,42 @@ Rectangle {
                     onSingleTapped: rowMenu.openFor(index, entry)
                 }
 
+                // Only a named note travels. target stays null so the row
+                // itself never moves: the view recycles delegates as it
+                // scrolls, and a label following the cursor is what is wanted
+                // anyway. The threshold keeps an ordinary click a click.
+                DragHandler {
+                    id: rowDrag
+                    enabled: !isHeader && !isDirectory && !isDraft
+                    target: null
+                    dragThreshold: sidebar.scaledSize(8)
+                    // Without this the list takes the grab back and flicks
+                    // itself the moment the drag passes the threshold.
+                    grabPermissions: PointerHandler.CanTakeOverFromItems
+                                     | PointerHandler.CanTakeOverFromHandlersOfDifferentType
+                                     | PointerHandler.ApprovesTakeOverByHandlersOfSameType
+                    onActiveChanged: {
+                        if (active) {
+                            sidebar.dragRow = index;
+                            sidebar.dragTitle = title;
+                            sidebar.updateDrag(centroid.scenePosition.x,
+                                               centroid.scenePosition.y);
+                        } else {
+                            sidebar.finishDrag(true);
+                        }
+                    }
+                    onCentroidChanged: {
+                        if (active)
+                            sidebar.updateDrag(centroid.scenePosition.x,
+                                               centroid.scenePosition.y);
+                    }
+                }
+
                 background: Rectangle {
-                    color: isHeader
+                    color: sidebar.dragging && sidebar.dropRow === index
+                        ? Qt.rgba(sidebar.accentColor.r, sidebar.accentColor.g,
+                                  sidebar.accentColor.b, 0.45)
+                        : isHeader
                         ? "transparent"
                         : isCurrent
                         ? Qt.rgba(sidebar.accentColor.r, sidebar.accentColor.g,
@@ -528,6 +640,42 @@ Rectangle {
         width: 1
         color: sidebar.mutedColor
         opacity: 0.3
+    }
+
+    // What the cursor is carrying, and where it would land. Late in the file so
+    // it paints over the list.
+    Rectangle {
+        id: dragLabel
+        visible: sidebar.dragging
+        z: 10
+        x: Math.max(sidebar.scaledSize(6),
+                    Math.min(sidebar.width - width - sidebar.scaledSize(6),
+                             sidebar.dragPoint.x + sidebar.scaledSize(12)))
+        y: sidebar.dragPoint.y - height / 2
+        width: Math.min(sidebar.width - sidebar.scaledSize(12),
+                        dragLabelText.implicitWidth + sidebar.scaledSize(16))
+        height: dragLabelText.implicitHeight + sidebar.scaledSize(10)
+        radius: sidebar.scaledSize(4)
+        color: Qt.tint(sidebar.pageColor,
+                       sidebar.darkMode ? Qt.rgba(1, 1, 1, 0.14) : Qt.rgba(0, 0, 0, 0.10))
+        border.width: 1
+        border.color: sidebar.dropRow === -2 ? sidebar.mutedColor : sidebar.accentColor
+
+        Text {
+            id: dragLabelText
+            anchors.centerIn: parent
+            width: parent.width - sidebar.scaledSize(16)
+            elide: Text.ElideMiddle
+            color: sidebar.dropRow === -2 ? sidebar.mutedColor : sidebar.textColor
+            font.pixelSize: sidebar.scaledSize(11)
+            text: {
+                if (sidebar.dropRow === -2 || !sidebar.vaultModel)
+                    return sidebar.dragTitle;
+                var folder = sidebar.vaultModel.dropFolderForRow(sidebar.dropRow);
+                return sidebar.dragTitle + "  \u2192  "
+                     + (folder.length > 0 ? folder : "vault root");
+            }
+        }
     }
 
     MouseArea {

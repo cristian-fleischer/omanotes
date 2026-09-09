@@ -82,6 +82,13 @@ public:
     Q_INVOKABLE QString relativeDirAt(int row) const;
     Q_INVOKABLE bool isHeaderAt(int row) const;
     Q_INVOKABLE bool hasDraftAt(int row) const;
+    // Dragging a note onto a folder files it there. The rules live here rather
+    // than in the delegate so they can be tested: a folder row means itself, a
+    // note row means the folder it is in, and row -1 is the empty space below
+    // the list, which is the vault root.
+    Q_INVOKABLE bool canDragAt(int row) const;
+    Q_INVOKABLE bool canDropOnRow(int sourceRow, int targetRow) const;
+    Q_INVOKABLE QString dropFolderForRow(int targetRow) const;
     Q_INVOKABLE QString titleAt(int row) const;
     Q_INVOKABLE bool isDirectoryAt(int row) const;
     Q_INVOKABLE void toggleExpanded(int row);

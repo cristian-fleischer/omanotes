@@ -130,6 +130,12 @@ the same name rather than "draft".
 The filter matches note names first and lists what ripgrep found inside the
 notes below, under a heading of its own, because a name is the stronger answer.
 
+Drag a note onto a folder to file it there. Hold over a closed folder and it
+opens so you can drop inside, the list scrolls when you reach an edge, and a
+label follows the cursor saying where the note would land. Dropping past the
+last row files it in the vault root. Folders, section labels and drafts do not
+travel: a draft has no name of its own yet, and saving it is what files it.
+
 Right-click a row for the rest: a new note in that folder, move to another
 folder, or delete. Deleting goes to the desktop trash, after a confirmation, so
 it can be put back.
