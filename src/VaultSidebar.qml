@@ -417,7 +417,7 @@ Rectangle {
                     && sidebar.vaultModel !== null && sidebar.vaultModel.filter.length > 0
                 readonly property real indent:
                     sidebar.scaledSize(10 + depth * 13)
-                height: isHeader ? sidebar.scaledSize(32)
+                height: isHeader ? sidebar.scaledSize(34)
                                  : showsParent ? sidebar.scaledSize(44) : sidebar.scaledSize(30)
                 padding: 0
                 enabled: !isHeader
@@ -484,17 +484,19 @@ Rectangle {
                     // A section label, not a row you can open. Sized to be
                     // read rather than noticed: a footnote here was easy to
                     // scroll straight past.
+                    // Dressed as a folder, because that is what a group looks
+                    // like in this list: a size up from the notes under it and
+                    // in the muted colour. Flush with them rather than indented
+                    // like a folder's name, since it has no triangle to sit
+                    // beside and heads the rows rather than containing them.
                     Text {
                         visible: isHeader
                         x: sidebar.scaledSize(10)
                         anchors.bottom: parent.bottom
                         anchors.bottomMargin: sidebar.scaledSize(4)
                         text: title
-                        color: Qt.tint(sidebar.mutedColor,
-                                       Qt.rgba(sidebar.textColor.r, sidebar.textColor.g,
-                                               sidebar.textColor.b, 0.45))
-                        font.pixelSize: sidebar.scaledSize(13)
-                        font.weight: Font.DemiBold
+                        color: sidebar.mutedColor
+                        font.pixelSize: sidebar.scaledSize(14)
                     }
 
                     // Drawn rather than typed: iA Writer Mono S has no
