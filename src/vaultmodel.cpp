@@ -457,7 +457,7 @@ void VaultModel::scan() {
 
     if (m_truncated) {
         qWarning().noquote() << QStringLiteral(
-            "OmaNote: %1 holds more than %2 Markdown files; the list stops there.")
+            "Omanotes: %1 holds more than %2 Markdown files; the list stops there.")
             .arg(m_root).arg(maximumFiles);
     }
 

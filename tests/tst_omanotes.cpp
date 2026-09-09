@@ -18,13 +18,13 @@
 #include "markdownhighlighter.h"
 #include "vaultmodel.h"
 
-class OmanoteTest : public QObject {
+class OmanotesTest : public QObject {
     Q_OBJECT
 
 private slots:
     void initTestCase() {
         QVERIFY(m_settingsDirectory.isValid());
-        // Keeps recovery snapshots out of the real ~/.local/share/omanote.
+        // Keeps recovery snapshots out of the real ~/.local/share/omanotes.
         QStandardPaths::setTestModeEnabled(true);
         QQuickStyle::setStyle(QStringLiteral("Material"));
         QSettings::setDefaultFormat(QSettings::IniFormat);
@@ -1812,5 +1812,5 @@ private:
     QTemporaryDir m_settingsDirectory;
 };
 
-QTEST_MAIN(OmanoteTest)
-#include "tst_omanote.moc"
+QTEST_MAIN(OmanotesTest)
+#include "tst_omanotes.moc"

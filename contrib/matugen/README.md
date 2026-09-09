@@ -1,6 +1,6 @@
 # Following the desktop palette without Omarchy
 
-OmaNote reads `~/.local/state/omarchy/current/theme/colors.toml`, the file
+Omanotes reads `~/.local/state/omarchy/current/theme/colors.toml`, the file
 Omarchy writes when the theme changes. On a machine without Omarchy that file
 does not exist and the app falls back to its built-in palette.
 
@@ -32,7 +32,7 @@ file once without waiting for a wallpaper change:
 dms ipc call theme dark    # or light, whichever is current
 ```
 
-OmaNote watches the file and the two directories above it, so a regenerated
+Omanotes watches the file and the two directories above it, so a regenerated
 palette reaches an open window without a restart.
 
 | Key | Matugen colour | Used for |

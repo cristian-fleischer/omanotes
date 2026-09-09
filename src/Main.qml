@@ -13,7 +13,7 @@ ApplicationWindow {
     minimumWidth: 720
     minimumHeight: 520
     visible: true
-    title: (backend.modified ? "* " : "") + backend.fileName + " - OmaNote"
+    title: (backend.modified ? "* " : "") + backend.fileName + " - Omanotes"
 
     readonly property bool darkMode: backend.darkMode
     readonly property color pageColor: backend.themeBackground
@@ -559,7 +559,7 @@ ApplicationWindow {
             // MIT requires the copyright notice to travel with the fork.
             Label {
                 objectName: "attribution"
-                text: "OmaNote. Fork of OmaWrite by David Heinemeier Hansson, MIT."
+                text: "Omanotes. Fork of OmaWrite by David Heinemeier Hansson, MIT."
                 color: win.mutedColor
                 font.pixelSize: win.scaledSize(11)
             }

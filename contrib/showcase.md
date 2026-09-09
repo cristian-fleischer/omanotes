@@ -1,11 +1,11 @@
-# OmaNote
+# Omanotes
 
 Plain Markdown in the buffer, styled over the source.
 
 ## Text
 
 **Bold**, *italic*, ***both***, ~~struck~~, `inline code`,
-and a [link](https://github.com/cristian-fleischer/omanote).
+and a [link](https://github.com/cristian-fleischer/omanotes).
 
 ## Lists
 

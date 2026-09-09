@@ -1,4 +1,4 @@
-# OmaNote
+# Omanotes
 
 A Markdown notes app for Linux: an editor that styles Markdown inline as you
 type, and a sidebar listing a folder of `.md` files. No GTK, no Chromium, no
@@ -7,15 +7,15 @@ browser engine. Qt 6 and about 600 KB.
 The buffer always holds your exact Markdown. Styling is applied over the source,
 never a conversion, and saving writes the bytes you see back unchanged.
 
-![OmaNote showing headings, lists, tasks, a table, syntax-highlighted code and a
-box-drawing diagram](docs/omanote.png)
+![Omanotes showing headings, lists, tasks, a table, syntax-highlighted code and a
+box-drawing diagram](docs/omanotes.png)
 
 That note is `contrib/showcase.md`. Open it to see what the editor draws over
 plain Markdown.
 
 Fork of [omawrite](https://github.com/omacom/omawrite) by David Heinemeier
 Hansson, MIT. The editing surface, autosave, atomic writes, crash recovery,
-portal dialogs and theme following all come from there. What OmaNote adds is
+portal dialogs and theme following all come from there. What Omanotes adds is
 the vault sidebar, the inline Markdown styling, syntax highlighting, tables,
 per-note drafts and the typography knobs described below.
 
@@ -33,23 +33,23 @@ per-note drafts and the typography knobs described below.
 From the release, on Arch and derivatives:
 
 ```sh
-curl -LO https://github.com/cristian-fleischer/omanote/releases/download/v0.1.0/omanote-0.1.0-1-x86_64.pkg.tar.zst
-sudo pacman -U omanote-0.1.0-1-x86_64.pkg.tar.zst
+curl -LO https://github.com/cristian-fleischer/omanotes/releases/download/v0.1.0/omanotes-0.1.0-1-x86_64.pkg.tar.zst
+sudo pacman -U omanotes-0.1.0-1-x86_64.pkg.tar.zst
 ```
 
 From source:
 
 ```sh
 sudo pacman -S --needed qt6-base qt6-declarative gcc make
-git clone https://github.com/cristian-fleischer/omanote.git
-cd omanote
+git clone https://github.com/cristian-fleischer/omanotes.git
+cd omanotes
 bin/install          # bin/build, then makepkg -fsi
 ```
 
-`bin/build` alone leaves the binary in `build/omanote` without packaging, and
+`bin/build` alone leaves the binary in `build/omanotes` without packaging, and
 `bin/test` runs the suite offscreen.
 
-It installs as `omanote` and shares nothing with `omawrite`: separate binary,
+It installs as `omanotes` and shares nothing with `omawrite`: separate binary,
 desktop file, icon and settings path, so both can be installed side by side.
 
 There is no package for other distributions. `bin/build` needs only `qmake6`,
@@ -120,7 +120,7 @@ behind it yet gets a row of its own at the top.
 - `Ctrl+Shift+F` picks the editor font.
 - `Ctrl+click` opens a link, a bare URL, or a path that exists next to the note.
 - `Ctrl+P` opens the system print dialog.
-- `Ctrl+N` opens a new OmaNote window.
+- `Ctrl+N` opens a new Omanotes window.
 - `Ctrl+Z`, `Ctrl+Shift+Z`, and `Ctrl+Y` handle undo and redo.
 - `Super+F` toggles fullscreen. Qt maps this key as `Meta+F`.
 - `Ctrl+F` searches the document. Use `Enter` or `Ctrl+G` for the next match and `Shift+Enter` for the previous match.
@@ -134,7 +134,7 @@ return. Every note holding a draft carries a dot in the sidebar until it is
 saved, and the file on disk is untouched throughout. The same snapshot covers a
 crash.
 
-OmaNote watches the open file and warns before an external change can replace
+Omanotes watches the open file and warns before an external change can replace
 local work.
 
 Zoom, the width toggle, the editor font, the window's size and whether it was

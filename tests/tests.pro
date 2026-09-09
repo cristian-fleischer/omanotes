@@ -1,11 +1,11 @@
 QT += core gui quick testlib
 CONFIG += testcase c++17
 TEMPLATE = app
-TARGET = tst_omanote
+TARGET = tst_omanotes
 
 INCLUDEPATH += ../src
 SOURCES += \
-    tst_omanote.cpp \
+    tst_omanotes.cpp \
     ../src/backend.cpp \
     ../src/markdownhighlighter.cpp \
     ../src/vaultmodel.cpp \

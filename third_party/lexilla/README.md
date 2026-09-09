@@ -4,7 +4,7 @@ Lexer sources from [Lexilla](https://github.com/ScintillaOrg/lexilla) 553, plus
 the three headers Lexilla needs from Scintilla (`ILexer.h`, `Sci_Position.h`,
 `Scintilla.h`).
 
-Statically linked, so OmaNote's package still depends only on `qt6-base`,
+Statically linked, so Omanotes's package still depends only on `qt6-base`,
 `qt6-declarative` and `xdg-desktop-portal`. Lexilla itself has no dependencies
 beyond the C++ standard library.
 

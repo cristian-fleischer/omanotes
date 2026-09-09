@@ -54,10 +54,10 @@ Dialog {
         Label {
             width: parent.width
             text: root.deleted
-                ? "This file was removed outside OmaNote. Keep your text as an unsaved document?"
+                ? "This file was removed outside Omanotes. Keep your text as an unsaved document?"
                 : (root.locallyModified
-                   ? "This file changed outside OmaNote. Reloading will discard your changes."
-                   : "This file changed outside OmaNote.")
+                   ? "This file changed outside Omanotes. Reloading will discard your changes."
+                   : "This file changed outside Omanotes.")
             color: root.textColor
             wrapMode: Text.Wrap
             font.family: "iA Writer Mono S"

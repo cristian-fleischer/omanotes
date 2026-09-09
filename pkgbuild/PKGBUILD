@@ -1,14 +1,14 @@
 # Maintainer: Cristian Fleischer <cristian.fleischer@gmail.com>
 # Fork of omawrite by David Heinemeier Hansson <david@hey.com>
 
-pkgname=omanote
+pkgname=omanotes
 pkgver=0.1.0
 pkgrel=1
 pkgdesc='Markdown notes app with a vault sidebar, forked from OmaWrite'
 arch=('x86_64')
-url='https://github.com/cristian-fleischer/omanote'
+url='https://github.com/cristian-fleischer/omanotes'
 license=('MIT')
-install='omanote.install'
+install='omanotes.install'
 depends=('qt6-base' 'qt6-declarative' 'xdg-desktop-portal')
 makedepends=('gcc' 'make' 'qt6-base' 'qt6-declarative')
 # No conflicts with omawrite: different binary, desktop file, icon and settings
@@ -23,9 +23,9 @@ build() {
 
 package() {
   cd "$startdir/.."
-  /usr/bin/install -Dm755 build/omanote "$pkgdir/usr/bin/omanote"
+  /usr/bin/install -Dm755 build/omanotes "$pkgdir/usr/bin/omanotes"
   /usr/bin/install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   /usr/bin/install -Dm644 fonts/OFL.txt "$pkgdir/usr/share/licenses/$pkgname/OFL.txt"
-  /usr/bin/install -Dm644 "$startdir/omanote.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/omanote.svg"
-  /usr/bin/install -Dm644 "$startdir/omanote.desktop" "$pkgdir/usr/share/applications/omanote.desktop"
+  /usr/bin/install -Dm644 "$startdir/omanotes.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/omanotes.svg"
+  /usr/bin/install -Dm644 "$startdir/omanotes.desktop" "$pkgdir/usr/share/applications/omanotes.desktop"
 }

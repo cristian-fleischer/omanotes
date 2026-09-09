@@ -1,12 +1,12 @@
 [Desktop Entry]
 Type=Application
-Name=OmaNote
+Name=Omanotes
 GenericName=Markdown Notes
 Comment=Markdown notes with a vault sidebar
-Exec=omanote %f
-Icon=omanote
+Exec=omanotes %f
+Icon=omanotes
 Terminal=false
 Categories=Office;WordProcessor;TextEditor;
 MimeType=text/markdown;text/x-markdown;text/plain;
 Keywords=markdown;notes;write;text;editor;vault;
-StartupWMClass=omanote
+StartupWMClass=omanotes
