@@ -81,6 +81,7 @@ public:
     Q_INVOKABLE bool deleteNote(const QString &path);
     Q_INVOKABLE QString relativeDirAt(int row) const;
     Q_INVOKABLE bool isHeaderAt(int row) const;
+    Q_INVOKABLE bool hasDraftAt(int row) const;
     Q_INVOKABLE QString titleAt(int row) const;
     Q_INVOKABLE bool isDirectoryAt(int row) const;
     Q_INVOKABLE void toggleExpanded(int row);

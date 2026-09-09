@@ -142,6 +142,17 @@ ApplicationWindow {
             backend.open(vault.urlForPath(moved));
     }
 
+    // Throws away the unsaved text and goes back to what is on disk. For the
+    // note in the editor that means reading it again; for one that is only
+    // holding a draft, dropping the draft is the whole of it.
+    function discardChanges(path) {
+        if (path === ""
+                || backend.fileUrl.toString() === vault.urlForPath(path).toString())
+            backend.discardChanges();
+        else
+            backend.discardDraftFor(vault.urlForPath(path));
+    }
+
     function deleteNote(path) {
         var wasOpen = backend.fileUrl.toString() === vault.urlForPath(path).toString();
         if (wasOpen)
@@ -342,6 +353,20 @@ ApplicationWindow {
         sequence: "Ctrl+0"
         context: Qt.ApplicationShortcut
         onActivated: win.setZoom(1.0)
+    }
+
+    Shortcut {
+        sequence: "Ctrl+Shift+R"
+        context: Qt.ApplicationShortcut
+        onActivated: {
+            if (!backend.modified || backend.untitled)
+                return;
+            // Empty means the note in the editor. Splicing a path out of the
+            // URL would lose every name with a space or a percent sign in it.
+            discardChangesDialog.notePath = "";
+            discardChangesDialog.noteTitle = backend.fileName;
+            discardChangesDialog.open();
+        }
     }
 
     Shortcut {
@@ -561,6 +586,25 @@ ApplicationWindow {
     }
 
     Dialog {
+        id: discardChangesDialog
+        objectName: "discardChangesDialog"
+        property string notePath: ""
+        property string noteTitle: ""
+        modal: true
+        Overlay.modal: Rectangle { color: Qt.rgba(0, 0, 0, 0.55) }
+        title: "Discard changes"
+        standardButtons: Dialog.Cancel | Dialog.Ok
+        anchors.centerIn: parent
+        onAccepted: win.discardChanges(discardChangesDialog.notePath)
+        contentItem: Label {
+            text: "Throw away the unsaved changes to \u201c"
+                  + discardChangesDialog.noteTitle
+                  + "\u201d?\nThe note goes back to what is on disk."
+            lineHeight: 1.4
+        }
+    }
+
+    Dialog {
         id: deleteNoteDialog
         objectName: "deleteNoteDialog"
         property string notePath: ""
@@ -595,7 +639,7 @@ ApplicationWindow {
             spacing: 12
 
             Label {
-                text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+Alt+N  New Note in the Vault\nCtrl+L  Toggle Sidebar\nCtrl+Shift+L  Focus the Note Filter\nCtrl+= / Ctrl+-  Zoom the Text\nCtrl+0  Reset the Zoom\nCtrl+M  Full Window Width\nCtrl+Shift+T  Align the Table\nCtrl+Shift+F  Editor Font\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
+                text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+Alt+N  New Note in the Vault\nCtrl+L  Toggle Sidebar\nCtrl+Shift+L  Focus the Note Filter\nCtrl+= / Ctrl+-  Zoom the Text\nCtrl+0  Reset the Zoom\nCtrl+M  Full Window Width\nCtrl+Shift+T  Align the Table\nCtrl+Shift+R  Discard Unsaved Changes\nCtrl+Shift+F  Editor Font\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
                 lineHeight: 1.5
             }
 
@@ -636,6 +680,11 @@ ApplicationWindow {
             onDraftActivated: editor.forceActiveFocus()
             onNewNoteRequested: function(relativeDir) { win.createNote(relativeDir); }
             onMoveRequested: function(path, relativeDir) { win.moveNote(path, relativeDir); }
+            onDiscardRequested: function(path, title) {
+                discardChangesDialog.notePath = path;
+                discardChangesDialog.noteTitle = title;
+                discardChangesDialog.open();
+            }
             onDeleteRequested: function(path, title) {
                 deleteNoteDialog.notePath = path;
                 deleteNoteDialog.noteTitle = title;

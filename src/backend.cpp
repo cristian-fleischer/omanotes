@@ -357,9 +357,23 @@ void Backend::closeFile() {
     writeRecovery();
 }
 
+void Backend::discardChanges() {
+    if (!m_fileUrl.isLocalFile())
+        return;
+
+    const QUrl url = m_fileUrl;
+    // Clearing the mark first is what makes this a discard rather than a
+    // reopen: open() stashes a modified buffer on the way out and hands it
+    // straight back on the way in, which is right everywhere else.
+    setModified(false);
+    m_drafts.remove(url.toString());
+    open(url);
+    writeRecovery();
+    emit draftsChanged();
+}
+
 void Backend::reloadFromDisk() {
-    if (m_fileUrl.isLocalFile())
-        open(m_fileUrl);
+    discardChanges();
 }
 
 void Backend::keepExternalVersion() {

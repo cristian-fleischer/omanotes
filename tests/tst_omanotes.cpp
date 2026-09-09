@@ -1921,6 +1921,46 @@ private slots:
     }
 
     // Save As on a draft offers the name it would get, not "draft".
+    // Unsaved text is kept, not forced on you: there has to be a way back to
+    // what is on disk.
+    void discardsChangesBackToTheFile() {
+        clearRecoverySnapshots();
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("note.md"));
+        QFile seed(path);
+        QVERIFY(seed.open(QIODevice::WriteOnly));
+        seed.write("# On disk\n\nthe saved text\n");
+        seed.close();
+
+        QQmlEngine engine;
+        QScopedPointer<QObject> editor(createEditor(&engine));
+        QVERIFY(editor);
+        Backend backend;
+        backend.attachDocument(editor->property("textDocument").value<QObject *>());
+        backend.open(QUrl::fromLocalFile(path));
+
+        QVERIFY(QMetaObject::invokeMethod(editor.data(), "insert", Q_ARG(int, 0),
+                                          Q_ARG(QString, QStringLiteral("scribble "))));
+        backend.editorTextChanged();
+        QVERIFY(backend.modified());
+        QCOMPARE(backend.draftPaths(), QStringList{path});
+
+        backend.discardChanges();
+        QVERIFY(!backend.modified());
+        QCOMPARE(editor->property("text").toString(),
+                 QStringLiteral("# On disk\n\nthe saved text\n"));
+        // The draft goes with the text, or the note would come back marked
+        // and hand the scribble over again on the next visit.
+        QVERIFY(backend.draftPaths().isEmpty());
+        QCOMPARE(backend.fileUrl(), QUrl::fromLocalFile(path));
+
+        // The file itself was never written, before or after.
+        QFile onDisk(path);
+        QVERIFY(onDisk.open(QIODevice::ReadOnly));
+        QCOMPARE(onDisk.readAll(), QByteArray("# On disk\n\nthe saved text\n"));
+    }
+
     void saveAsProposesTheTitle() {
         QTemporaryDir vaultDirectory;
         QVERIFY(vaultDirectory.isValid());

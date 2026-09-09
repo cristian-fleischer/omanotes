@@ -133,7 +133,9 @@ Right-click a row for the rest: a new note in that folder, move to another
 folder, or delete. Deleting goes to the desktop trash, after a confirmation, so
 it can be put back.
 
-Notes with unsaved changes are marked with a dot.
+Notes with unsaved changes are marked with a dot. `Ctrl+Shift+R` throws those
+changes away and reads the note back off the disk, after asking; the same is on
+the right-click menu of any note carrying a dot, open or not.
 
 ## Shortcuts
 
@@ -146,6 +148,7 @@ Notes with unsaved changes are marked with a dot.
 - `Ctrl+M` drops the 65-character measure and lets the text use the window, as does the rightmost footer icon.
 - `Ctrl+Shift+F` picks the editor font.
 - `Ctrl+click` opens a link, a bare URL, or a path that exists next to the note.
+- `Ctrl+Shift+R` throws away the unsaved changes and reads the note back off the disk.
 - `Ctrl+P` opens the system print dialog.
 - `Ctrl+N` opens a new Omanotes window.
 - `Ctrl+Z`, `Ctrl+Shift+Z`, and `Ctrl+Y` handle undo and redo.

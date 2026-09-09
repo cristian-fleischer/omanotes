@@ -34,6 +34,7 @@ Rectangle {
     signal newNoteRequested(string relativeDir)
     signal moveRequested(string path, string relativeDir)
     signal deleteRequested(string path, string title)
+    signal discardRequested(string path, string title)
     signal rootChangeRequested()
     signal dismissed()
 
@@ -245,6 +246,7 @@ Rectangle {
                 property string targetTitle: ""
                 property string targetDir: ""
                 property bool targetIsDirectory: false
+                property bool targetHasDraft: false
 
                 function openFor(row, item) {
                     if (!sidebar.vaultModel)
@@ -253,6 +255,7 @@ Rectangle {
                     rowMenu.targetDir = sidebar.vaultModel.relativeDirAt(row);
                     rowMenu.targetIsDirectory = sidebar.vaultModel.isDirectoryAt(row);
                     rowMenu.targetTitle = sidebar.vaultModel.titleAt(row);
+                    rowMenu.targetHasDraft = sidebar.vaultModel.hasDraftAt(row);
                     rowMenu.popup(item);
                 }
 
@@ -261,6 +264,13 @@ Rectangle {
                     onTriggered: sidebar.newNoteRequested(rowMenu.targetDir)
                 }
                 MenuSeparator { visible: !rowMenu.targetIsDirectory }
+                MenuItem {
+                    text: "Discard unsaved changes\u2026"
+                    enabled: rowMenu.targetHasDraft
+                    visible: rowMenu.targetHasDraft
+                    onTriggered: sidebar.discardRequested(rowMenu.targetPath,
+                                                          rowMenu.targetTitle)
+                }
                 Menu {
                     title: "Move to"
                     enabled: !rowMenu.targetIsDirectory

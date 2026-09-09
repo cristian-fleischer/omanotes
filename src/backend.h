@@ -107,6 +107,8 @@ public:
     // that is open, where the watcher would otherwise call our own delete an
     // outside change.
     Q_INVOKABLE void closeFile();
+    // Throws the unsaved text away and reads the note back off the disk.
+    Q_INVOKABLE void discardChanges();
     Q_INVOKABLE void reloadFromDisk();
     Q_INVOKABLE void keepExternalVersion();
     Q_INVOKABLE void printDocument();

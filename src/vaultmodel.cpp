@@ -764,6 +764,11 @@ bool VaultModel::isHeaderAt(int row) const {
     return row >= 0 && row < m_rows.size() && m_rows.at(row).header;
 }
 
+bool VaultModel::hasDraftAt(int row) const {
+    return row >= 0 && row < m_rows.size() && !m_rows.at(row).directory
+        && m_draftPaths.contains(m_rows.at(row).path);
+}
+
 QString VaultModel::titleAt(int row) const {
     return row >= 0 && row < m_rows.size() ? m_rows.at(row).title : QString();
 }
