@@ -499,39 +499,68 @@ Rectangle {
                         font.pixelSize: sidebar.scaledSize(14)
                     }
 
-                    // Drawn rather than typed: iA Writer Mono S has no
-                    // geometric-shape glyphs, and a fallback font puts a dot
-                    // where the triangle should be.
+                    // Drawn rather than typed: a monospace writing font has no
+                    // geometric shapes, and a fallback font puts a dot where
+                    // the icon should be. Same 16-unit grid and stroke as the
+                    // footer icons, so the two sets match.
                     Canvas {
                         id: disclosure
                         x: entry.indent
                         anchors.verticalCenter: parent.verticalCenter
                         visible: isDirectory
-                        width: sidebar.scaledSize(9)
-                        height: sidebar.scaledSize(9)
 
+                        // Canvas rasterizes one surface pixel per logical pixel
+                        // and is upscaled blurry on a hidpi screen. Draw at the
+                        // physical size and scale the item back down.
                         readonly property real dpr: Screen.devicePixelRatio
                         readonly property bool open: isDirectory && isExpanded
+                        readonly property real unit: sidebar.scaledSize(14) / 16
+                        width: sidebar.scaledSize(14) * dpr
+                        height: sidebar.scaledSize(14) * dpr
+                        transformOrigin: Item.TopLeft
+                        scale: 1 / dpr
                         onOpenChanged: requestPaint()
                         onDprChanged: requestPaint()
 
+                        Connections {
+                            target: sidebar
+                            function onMutedColorChanged() { disclosure.requestPaint(); }
+                        }
+
                         onPaint: {
+                            var u = disclosure.unit;
                             var context = getContext("2d");
-                            context.reset();
-                            context.fillStyle = sidebar.mutedColor;
-                            var size = width;
+                            context.setTransform(dpr * u, 0, 0, dpr * u, 0, 0);
+                            context.clearRect(0, 0, 16, 16);
+                            context.strokeStyle = sidebar.mutedColor;
+                            context.lineWidth = 1.4 / u;
+                            context.lineCap = "round";
+                            context.lineJoin = "round";
                             context.beginPath();
                             if (open) {
-                                context.moveTo(size * 0.1, size * 0.3);
-                                context.lineTo(size * 0.9, size * 0.3);
-                                context.lineTo(size * 0.5, size * 0.78);
+                                // The back of the folder, with the front panel
+                                // tipped forward off it.
+                                context.moveTo(2.5, 12.5);
+                                context.lineTo(2.5, 3.5);
+                                context.lineTo(6.5, 3.5);
+                                context.lineTo(8.5, 5.5);
+                                context.lineTo(12.5, 5.5);
+                                context.lineTo(12.5, 7.5);
+                                context.moveTo(2.5, 12.5);
+                                context.lineTo(4.8, 7.5);
+                                context.lineTo(15, 7.5);
+                                context.lineTo(12.7, 12.5);
+                                context.closePath();
                             } else {
-                                context.moveTo(size * 0.3, size * 0.1);
-                                context.lineTo(size * 0.78, size * 0.5);
-                                context.lineTo(size * 0.3, size * 0.9);
+                                context.moveTo(2.5, 12.5);
+                                context.lineTo(2.5, 3.5);
+                                context.lineTo(6.5, 3.5);
+                                context.lineTo(8.5, 5.5);
+                                context.lineTo(13.5, 5.5);
+                                context.lineTo(13.5, 12.5);
+                                context.closePath();
                             }
-                            context.closePath();
-                            context.fill();
+                            context.stroke();
                         }
                     }
 
@@ -551,7 +580,7 @@ Rectangle {
 
                     Column {
                         visible: !isHeader
-                        x: entry.indent + (isDirectory ? sidebar.scaledSize(13) : 0)
+                        x: entry.indent + (isDirectory ? sidebar.scaledSize(19) : 0)
                         width: entry.width - x - sidebar.scaledSize(24)
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: 1
