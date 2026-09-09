@@ -49,6 +49,10 @@ bool isFenceLine(const QString &line) {
 }
 
 bool isTableRow(const QString &line) {
+    // Called for every block of the document on every edit. A line without a
+    // pipe cannot be a row, and testing for one is far cheaper than the regex.
+    if (!line.contains(QLatin1Char('|')))
+        return false;
     return tableRowRe().match(line).hasMatch();
 }
 

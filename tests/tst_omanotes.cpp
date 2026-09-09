@@ -5,6 +5,7 @@
 #include <QTextLayout>
 #include <QTextLine>
 #include <QColor>
+#include <QElapsedTimer>
 #include <QFontDatabase>
 #include <QQuickTextDocument>
 #include <QWindow>
@@ -761,6 +762,47 @@ private slots:
         QCOMPARE(lineHeight(2), 120.0);
         QCOMPARE(margins(0), (QPair<qreal, qreal>{0.0, 0.0}));
         QCOMPARE(backend.fencedCodeRegions().size(), 1);
+    }
+
+    // Typography is a block property, so every block needs one. Setting them
+    // one at a time laid the document out once per block: 660 ms for this
+    // note, and a second of frozen window before it appeared.
+    void opensALargeNoteQuickly() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("big.md"));
+        QFile seed(path);
+        QVERIFY(seed.open(QIODevice::WriteOnly));
+        QByteArray text;
+        for (int i = 0; i < 1500; ++i) {
+            if (i % 25 == 0)
+                text += "\n```sh\nls -la ~/Notes\n```\n";
+            else
+                text += "A line of prose with some **bold** and `code` in it.\n";
+        }
+        seed.write(text);
+        seed.close();
+
+        QQmlEngine engine;
+        QScopedPointer<QObject> editor(createEditor(&engine));
+        QVERIFY(editor);
+        Backend backend;
+        backend.attachDocument(editor->property("textDocument").value<QObject *>());
+
+        QElapsedTimer timer;
+        timer.start();
+        backend.open(QUrl::fromLocalFile(path));
+        const qint64 elapsed = timer.elapsed();
+
+        QTextDocument *document =
+            qobject_cast<QQuickTextDocument *>(
+                editor->property("textDocument").value<QObject *>())->textDocument();
+        QVERIFY(document);
+        QVERIFY(document->blockCount() > 1500);
+        // Well clear of what it costs, so this only fails if the per-block
+        // edit comes back rather than when the machine is busy.
+        QVERIFY2(elapsed < 300,
+                 qPrintable(QStringLiteral("opening took %1 ms").arg(elapsed)));
     }
 
     // The chrome's family is a config knob: main() reads it before any window

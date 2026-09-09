@@ -182,26 +182,30 @@ there, and the zoom multiplies on top.
 ## Footprint
 
 Measured on Arch with Qt 6.11, a Wayland session and an AMD iGPU, against
-upstream omawrite 0.5.0 on the same machine and the same file.
+upstream omawrite 0.5.0 on the same machine and the same files. Startup is
+wall-clock from exec to the window on screen, best of five.
 
 | | Omanotes | omawrite |
 | --- | --- | --- |
-| Binary | 1.3 MB | 572 KB |
-| Installed package | 1.29 MB | 565 KB |
-| PSS, short note idle | 82 MB | 71 MB |
+| Binary | 979 KB | 572 KB |
+| Installed package | 985 KB | 565 KB |
+| Window on screen, short note | 0.26 s | 0.21 s |
+| Window on screen, 62 KB note | 0.40 s | 0.26 s |
+| PSS, short note idle | 86 MB | 71 MB |
 | PSS, 62 KB note idle | 118 MB | 99 MB |
-| CPU to open a 62 KB note | 1.25 s | 0.45 s |
 | CPU idle, per 12 s | 0.01 s | 0.00 s |
 
-The binary is bigger because of Lexilla (379 KB of lexers) and roughly 165 KB of
-extra code. 401 KB of both binaries is the bundled font, which comes from
-upstream.
+200 KB of the binary is the bundled font, compressed, and it comes from
+upstream. Of the code, measured before link-time optimisation folds it
+together: 379 KB is Lexilla's nine lexers, 333 KB this fork's own, and 170 KB
+upstream's editor. Compressing the resources and building with link-time
+optimisation and section garbage collection are worth about 300 KB between
+them; both are set in `omanotes.pro` with the reasoning.
 
 Most of the memory is neither app: 38 MB of the 118 MB is the Mesa GL stack the
 scene graph pulls in, which `QT_QUICK_BACKEND=software` removes at the cost of
-frame rate. Startup is identical to upstream at 0.26 s of CPU; the extra second
-on a 62 KB note is the first inline-highlight pass over 1,700 lines, and it does
-not recur.
+frame rate. Qt's own libraries account for 16 MB of it, and the whole of
+Omanotes for about 19 MB more than upstream.
 
 ## Requirements
 

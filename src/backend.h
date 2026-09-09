@@ -177,10 +177,14 @@ private:
     int tableRunStart(const QTextBlock &block) const;
     void reapplyTypographyToChange();
     bool isCodeBlock(const QTextBlock &block) const;
-    qreal lineHeightForBlock(const QTextBlock &block) const;
-    qreal blockMarginFor(const QTextBlock &block) const;
-    bool hasWantedTypography(const QTextBlock &block) const;
-    void applyBlockTypography(QTextCursor &cursor, const QTextBlock &block);
+    // What a block is styled as. Working it out costs a regex, so the
+    // typography pass does it once per block and passes it down.
+    enum class BlockKind { Prose, Code, TableRow };
+    BlockKind blockKind(const QTextBlock &block) const;
+    qreal lineHeightFor(BlockKind kind) const;
+    qreal blockMarginFor(BlockKind kind) const;
+    bool hasWantedTypography(const QTextBlock &block, BlockKind kind) const;
+    void applyBlockTypography(QTextCursor &cursor, const QTextBlock &block, BlockKind kind);
     void scheduleRecovery();
     void writeRecovery();
     void stashDraft();
