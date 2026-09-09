@@ -150,7 +150,8 @@ the right-click menu of any note carrying a dot, open or not.
 - `Ctrl+Shift+S` saves as.
 - `Ctrl+O` opens a Markdown file through the portal picker.
 - `Ctrl+L` shows and hides the sidebar, as does the leftmost footer icon. It starts hidden. `Ctrl+Shift+L` focuses its filter field.
-- `Ctrl+Alt+N` creates a new note in the vault root.
+- `Ctrl+Alt+N` creates a new note where you are pointing: the folder of the row picked in the sidebar, else the folder the open note lives in, else the vault root.
+- `Del` deletes the note picked in the sidebar, after asking. With no row picked it stays an ordinary editing key.
 - `Ctrl+=` and `Ctrl+-` scale the text, `Ctrl+0` puts it back, `Ctrl+wheel` does the same with the mouse.
 - `Ctrl+M` drops the 65-character measure and lets the text use the window, as does the rightmost footer icon.
 - `Ctrl+Shift+F` picks the editor font.

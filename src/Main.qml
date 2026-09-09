@@ -122,8 +122,20 @@ ApplicationWindow {
         editor.forceActiveFocus();
     }
 
+    // Where a new note goes when nobody said: the folder of the row picked in
+    // the sidebar, else the folder the open note lives in, else the root.
+    function newNoteFolder() {
+        if (win.sidebarVisible && sidebar.selectedRow >= 0
+                && !vault.isHeaderAt(sidebar.selectedRow))
+            return vault.relativeDirAt(sidebar.selectedRow);
+        if (!backend.untitled)
+            return vault.relativeDirForUrl(backend.fileUrl);
+        return "";
+    }
+
     function createNote(relativeDir) {
-        var path = vault.createNote(relativeDir === undefined ? "" : relativeDir);
+        var path = vault.createNote(
+            relativeDir === undefined ? win.newNoteFolder() : relativeDir);
         if (path === "") {
             return;
         }
@@ -639,7 +651,7 @@ ApplicationWindow {
             spacing: 12
 
             Label {
-                text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+Alt+N  New Note in the Vault\nCtrl+L  Toggle Sidebar\nCtrl+Shift+L  Focus the Note Filter\nCtrl+= / Ctrl+-  Zoom the Text\nCtrl+0  Reset the Zoom\nCtrl+M  Full Window Width\nCtrl+Shift+T  Align the Table\nCtrl+Shift+R  Discard Unsaved Changes\nCtrl+Shift+F  Editor Font\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
+                text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+Alt+N  New Note Where You Are\nDel  Delete the Note Picked in the Sidebar\nCtrl+L  Toggle Sidebar\nCtrl+Shift+L  Focus the Note Filter\nCtrl+= / Ctrl+-  Zoom the Text\nCtrl+0  Reset the Zoom\nCtrl+M  Full Window Width\nCtrl+Shift+T  Align the Table\nCtrl+Shift+R  Discard Unsaved Changes\nCtrl+Shift+F  Editor Font\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
                 lineHeight: 1.5
             }
 

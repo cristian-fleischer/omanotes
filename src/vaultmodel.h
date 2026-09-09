@@ -80,6 +80,9 @@ public:
     // To the desktop trash where there is one, so it can be put back.
     Q_INVOKABLE bool deleteNote(const QString &path);
     Q_INVOKABLE QString relativeDirAt(int row) const;
+    // The folder a note lives in, relative to the root. A draft answers with
+    // the folder it belongs to rather than the hidden directory it sits in.
+    Q_INVOKABLE QString relativeDirForUrl(const QUrl &url) const;
     Q_INVOKABLE bool isHeaderAt(int row) const;
     Q_INVOKABLE bool hasDraftAt(int row) const;
     // Dragging a note onto a folder files it there. The rules live here rather

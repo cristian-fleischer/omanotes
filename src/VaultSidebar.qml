@@ -23,6 +23,8 @@ Rectangle {
     // What to call the open note while its file is still untitled.md, so a new
     // note is labelled by what you typed before you get round to saving it.
     property string placeholderTitle: ""
+    // The row the keyboard and the menus act on, -1 for none.
+    readonly property int selectedRow: list.currentIndex
 
     // Dragging a note onto a folder files it there. The row being dragged, the
     // row under the cursor, and where the label following the cursor sits.
@@ -40,7 +42,9 @@ Rectangle {
     signal noteActivated(url fileUrl)
     signal draftActivated()
     // Empty means the vault root; a folder's path relative to it otherwise.
-    signal newNoteRequested(string relativeDir)
+    // A string names a folder; undefined means "wherever I am pointing", which
+    // the window works out from the selection and the note that is open.
+    signal newNoteRequested(var relativeDir)
     signal moveRequested(string path, string relativeDir)
     signal deleteRequested(string path, string title)
     signal discardRequested(string path, string title)
@@ -173,6 +177,16 @@ Rectangle {
         }
     }
 
+    // Asks for the selected note to be deleted. Returns whether there was one.
+    function deleteSelection() {
+        var row = list.currentIndex;
+        if (!sidebar.vaultModel || row < 0 || !sidebar.vaultModel.canDragAt(row))
+            return false;
+        sidebar.deleteRequested(sidebar.vaultModel.pathAt(row),
+                                sidebar.vaultModel.titleAt(row));
+        return true;
+    }
+
     function activateSelection() {
         activate(list.currentIndex >= 0 ? list.currentIndex : 0);
     }
@@ -236,6 +250,11 @@ Rectangle {
                 }
                 Keys.onRightPressed: function(event) {
                     event.accepted = sidebar.expandSelection(true);
+                }
+                // Del acts on the row you have picked. With no row picked it
+                // is an ordinary editing key in this field.
+                Keys.onDeletePressed: function(event) {
+                    event.accepted = sidebar.deleteSelection();
                 }
                 Keys.onReturnPressed: sidebar.activateSelection()
                 Keys.onEnterPressed: sidebar.activateSelection()
@@ -585,7 +604,7 @@ Rectangle {
                         anchors.margins: -sidebar.scaledSize(6)
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: sidebar.newNoteRequested("")
+                        onClicked: sidebar.newNoteRequested(undefined)
                     }
                 }
             }
@@ -617,7 +636,7 @@ Rectangle {
                     iconName: "newnote"
                     iconColor: sidebar.mutedColor
                     tooltip: "New note (Ctrl+Alt+N)"
-                    onClicked: sidebar.newNoteRequested("")
+                    onClicked: sidebar.newNoteRequested(undefined)
                 }
 
                 FooterIconButton {

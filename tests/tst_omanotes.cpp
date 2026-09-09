@@ -295,6 +295,94 @@ private slots:
     // submenu's `visible` is about its popup rather than its row, so one menu
     // with rows switched off came up as a column of empty space. There are two
     // menus now, and the one conditional row collapses to nothing.
+    // A new note lands where you are pointing, and Del acts on the row you
+    // picked rather than on the note that happens to be open.
+    void newNoteFollowsTheSelection() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        QTemporaryDir vaultDirectory;
+        QVERIFY(vaultDirectory.isValid());
+        QVERIFY(writeNote(vaultDirectory.path(), QStringLiteral("Root.md")));
+        QVERIFY(writeNote(vaultDirectory.path(), QStringLiteral("projects/Beta.md")));
+
+        Backend backend;
+        VaultModel vault;
+        vault.setRoot(vaultDirectory.path());
+
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        engine.rootContext()->setContextProperty(QStringLiteral("vault"), &vault);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        // The folder a note lives in, straight off its URL, with no path
+        // spliced out of a file:// string.
+        const QString beta = QDir(vaultDirectory.path())
+                                 .filePath(QStringLiteral("projects/Beta.md"));
+        QCOMPARE(vault.relativeDirForUrl(QUrl::fromLocalFile(beta)),
+                 QStringLiteral("projects"));
+        QCOMPARE(vault.relativeDirForUrl(
+                     QUrl::fromLocalFile(QDir(vaultDirectory.path())
+                                             .filePath(QStringLiteral("Root.md")))),
+                 QString());
+        QCOMPARE(vault.relativeDirForUrl(QUrl::fromLocalFile(QStringLiteral("/etc/hosts"))),
+                 QString());
+
+        // Nothing selected and nothing open: the root.
+        QCOMPARE(window->property("sidebarVisible").toBool(), false);
+        QVariant folder;
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "newNoteFolder",
+                                          Q_RETURN_ARG(QVariant, folder)));
+        QCOMPARE(folder.toString(), QString());
+
+        // The note you are in decides when the sidebar has no say.
+        backend.open(QUrl::fromLocalFile(beta));
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "newNoteFolder",
+                                          Q_RETURN_ARG(QVariant, folder)));
+        QCOMPARE(folder.toString(), QStringLiteral("projects"));
+
+        // A row picked in the sidebar wins over it.
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "toggleSidebar"));
+        QObject *sidebar = window->findChild<QObject *>(QStringLiteral("vaultSidebar"));
+        QObject *list = window->findChild<QObject *>(QStringLiteral("vaultList"));
+        QVERIFY(sidebar && list);
+        const int rootRow = vault.rowForPath(
+            QDir(vaultDirectory.path()).filePath(QStringLiteral("Root.md")));
+        QVERIFY(rootRow >= 0);
+        list->setProperty("currentIndex", rootRow);
+        QCOMPARE(sidebar->property("selectedRow").toInt(), rootRow);
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "newNoteFolder",
+                                          Q_RETURN_ARG(QVariant, folder)));
+        QCOMPARE(folder.toString(), QString());
+
+        // Del asks for that row, not for the note in the editor.
+        QSignalSpy asked(sidebar, SIGNAL(deleteRequested(QString, QString)));
+        QVariant handled;
+        QVERIFY(QMetaObject::invokeMethod(sidebar, "deleteSelection",
+                                          Q_RETURN_ARG(QVariant, handled)));
+        QCOMPARE(handled.toBool(), true);
+        QCOMPARE(asked.count(), 1);
+        QCOMPARE(asked.first().first().toString(),
+                 QDir(vaultDirectory.path()).filePath(QStringLiteral("Root.md")));
+
+        // A folder row is not a note, so Del leaves it to the field.
+        list->setProperty("currentIndex", 0);
+        QVERIFY(vault.isDirectoryAt(0));
+        QVERIFY(QMetaObject::invokeMethod(sidebar, "deleteSelection",
+                                          Q_RETURN_ARG(QVariant, handled)));
+        QCOMPARE(handled.toBool(), false);
+        QCOMPARE(asked.count(), 1);
+
+        // Whether the sidebar is open is remembered between runs, and the
+        // window writes it out as it goes, so close it rather than only
+        // resetting the setting.
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "toggleSidebar"));
+        QSettings().setValue(QStringLiteral("vault/sidebarVisible"), false);
+    }
+
     void rowMenusHaveNoEmptyRows() {
         const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
         QVERIFY(!mainQmlPath.isEmpty());

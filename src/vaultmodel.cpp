@@ -808,6 +808,20 @@ bool VaultModel::canDropOnRow(int sourceRow, int targetRow) const {
     return dropFolderForRow(targetRow) != m_rows.at(sourceRow).relativeDir;
 }
 
+QString VaultModel::relativeDirForUrl(const QUrl &url) const {
+    if (m_canonicalRoot.isEmpty() || !url.isLocalFile())
+        return {};
+
+    const QString path = QFileInfo(url.toLocalFile()).canonicalFilePath();
+    if (path.isEmpty() || !isInside(path, m_canonicalRoot))
+        return {};
+
+    const QString owner = folderForDraft(path);
+    const QString folder = owner.isEmpty() ? QFileInfo(path).dir().canonicalPath() : owner;
+    const QString relative = QDir(m_canonicalRoot).relativeFilePath(folder);
+    return relative == QStringLiteral(".") ? QString() : relative;
+}
+
 QString VaultModel::moveNote(const QString &path, const QString &relativeDir) {
     const QString canonical = QFileInfo(path).canonicalFilePath();
     if (m_canonicalRoot.isEmpty() || canonical.isEmpty()
