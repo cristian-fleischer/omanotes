@@ -244,6 +244,9 @@ private:
     // in: visiting one must not rewrite it, and opening a file must not
     // touch anything at all.
     int m_editedTableFirstBlock = -1;
+    // The caret is put at the top of a freshly loaded note by the view, not by
+    // the reader. That placement does not count as visiting what is there.
+    bool m_cursorFollowsLoad = false;
     bool m_aligningTable = false;
     // Percentages of the line's own font size, from settings.
     qreal m_lineHeight = 140;

@@ -147,6 +147,75 @@ private slots:
         QCOMPARE(document->findBlockByNumber(1).text(), QStringLiteral("|---|---|"));
     }
 
+    // Putting the caret in a table is what counts as working on it, so leaving
+    // one tidies it whether or not you typed in it. Visiting one that already
+    // lines up has to change nothing, or every click would dirty the note.
+    void alignsATableTheCaretVisited() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("visited.md"));
+        QFile seed(path);
+        QVERIFY(seed.open(QIODevice::WriteOnly));
+        seed.write("| Day | Cris | Rux |\n"
+                   "|---|---|---|\n"
+                   "| Mon | O 100% | H 50% |\n"
+                   "| Tue | H 50% | O 100% |\n"
+                   "\n"
+                   "after\n");
+        seed.close();
+
+        QQmlEngine engine;
+        QScopedPointer<QObject> editor(createEditor(&engine));
+        QVERIFY(editor);
+        Backend backend;
+        backend.attachDocument(editor->property("textDocument").value<QObject *>());
+        backend.open(QUrl::fromLocalFile(path));
+
+        QTextDocument *document =
+            qobject_cast<QQuickTextDocument *>(
+                editor->property("textDocument").value<QObject *>())->textDocument();
+        QVERIFY(document);
+        const auto line = [document](int number) {
+            return document->findBlockByNumber(number).text();
+        };
+        const int outside = document->findBlockByNumber(5).position();
+
+        // The view puts the caret at the top of a note it has just loaded.
+        // That is not the reader visiting anything.
+        backend.setCursorPosition(0);
+        backend.setCursorPosition(outside);
+        QVERIFY(!backend.editorTextChanged());
+        QVERIFY(!backend.modified());
+        QCOMPARE(line(1), QStringLiteral("|---|---|---|"));
+
+        // Caret in, caret out: tidied, without a character typed. The editor
+        // reports the change the same way it reports typing, which is what
+        // marks the note unsaved.
+        backend.setCursorPosition(document->findBlockByNumber(2).position());
+        backend.setCursorPosition(outside);
+        QVERIFY(backend.editorTextChanged());
+        QVERIFY(backend.modified());
+        const QString header = line(0);
+        for (int row = 1; row <= 3; ++row)
+            QCOMPARE(line(row).size(), header.size());
+        QVERIFY(header.startsWith(QStringLiteral("| Day ")));
+
+        // Now the columns line up, so the grid is drawn over it.
+        QCOMPARE(backend.tableRegions().constFirst().toMap()
+                     .value(QStringLiteral("columns")).toList().size(), 4);
+
+        // Visiting it again is free: nothing to tidy, so nothing changes and
+        // the note does not go dirty behind you.
+        backend.save();
+        QVERIFY(!backend.modified());
+        const QString settled = line(0);
+        backend.setCursorPosition(document->findBlockByNumber(3).position());
+        backend.setCursorPosition(outside);
+        QVERIFY(!backend.editorTextChanged());
+        QVERIFY(!backend.modified());
+        QCOMPARE(line(0), settled);
+    }
+
     void tableRegionsShareOnlyAlignedColumns() {
         QTemporaryDir directory;
         QVERIFY(directory.isValid());
@@ -185,6 +254,19 @@ private slots:
         const QVariantMap ragged = regions.at(1).toMap();
         QVERIFY(ragged.value(QStringLiteral("columns")).toList().isEmpty());
         QCOMPARE(ragged.value(QStringLiteral("separator")).toInt(), -1);
+
+        // With no rule drawn for it, the separator row stays visible: folding
+        // it away would leave the header and the body with nothing between
+        // them at all.
+        QTextDocument *document =
+            qobject_cast<QQuickTextDocument *>(
+                editor->property("textDocument").value<QObject *>())->textDocument();
+        QVERIFY(document);
+        document->setTextWidth(600);
+        (void)document->size();
+        QVERIFY(!qFuzzyCompare(formatAt(*document, 5, 0).fontPointSize(), 1.0));
+        // The aligned table's separator does fold, because a rule replaces it.
+        QCOMPARE(formatAt(*document, 1, 0).fontPointSize(), 1.0);
     }
 
     void markersRevealWhereTheCaretIs() {
@@ -993,9 +1075,12 @@ private slots:
         QVERIFY(MarkdownHighlighter::inlineMarkup(row).isEmpty());
         QCOMPARE(formatAt(document, 3, 8).fontWeight(), int(QFont::Bold));
 
-        // The separator collapses; a rule is drawn where it was.
+        // The separator collapses only where a rule is drawn in its place, so
+        // a table with no grid keeps the line between its header and its body.
         QVERIFY(MarkdownHighlighter::isTableSeparator(
             document.findBlockByNumber(1).text()));
+        QVERIFY(!qFuzzyCompare(formatAt(document, 1, 1).fontPointSize(), 1.0));
+        highlighter.setGriddedRows(QSet<int>{0, 1, 2});
         QCOMPARE(formatAt(document, 1, 1).fontPointSize(), 1.0);
         QCOMPARE(document.findBlockByNumber(0).userState(),
                  int(MarkdownHighlighter::TableRow));

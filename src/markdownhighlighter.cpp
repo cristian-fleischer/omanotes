@@ -637,10 +637,12 @@ bool MarkdownHighlighter::highlightTableRow(const QString &text) {
     const bool gridded = !active && m_griddedRows.contains(blockNumber);
     const QTextCharFormat &pipeFormat = gridded ? m_hiddenMarkerFormat : m_tablePipeFormat;
 
-    // The separator is scaffolding: it collapses and a rule is drawn where it
-    // was, unless the caret is on it.
+    // The separator is scaffolding, so it collapses and a rule is drawn where
+    // it was. Only where one is drawn: a table whose source does not line up
+    // gets no rules, and folding the row away there would take the line
+    // between the header and the body with it.
     if (isTableSeparator(text)) {
-        setFormat(0, text.length(), active ? m_tableSeparatorFormat : m_hiddenMarkerFormat);
+        setFormat(0, text.length(), gridded ? m_hiddenMarkerFormat : m_tableSeparatorFormat);
         return true;
     }
 

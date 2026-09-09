@@ -854,11 +854,19 @@ bool Backend::alignTableAt(int position) {
         aligned.append(line);
     }
 
-    const QString replacement = aligned.join(QLatin1Char('\n'));
-    if (replacement == m_document->toRawText().mid(
-            first.position(), last.position() + last.length() - 1 - first.position())) {
-        return false;
+    // Compare row by row rather than against a slice of the document: raw text
+    // separates blocks with U+2029, so a join on "\n" never matched and every
+    // pass rewrote a table that was already aligned.
+    QStringList current;
+    for (QTextBlock block = first; block.isValid(); block = block.next()) {
+        current.append(block.text());
+        if (block == last)
+            break;
     }
+    if (aligned == current)
+        return false;
+
+    const QString replacement = aligned.join(QLatin1Char('\n'));
 
     QTextCursor cursor(m_document);
     cursor.beginEditBlock();
@@ -878,23 +886,32 @@ void Backend::setCursorPosition(int position) {
     if (!block.isValid())
         return;
 
-    // Leaving a table that was typed in tidies it up, the way an editor
-    // reflows a paragraph when you move on. Never on open, never on a visit.
+    // Leaving a table tidies it up, the way an editor reflows a paragraph when
+    // you move on. Putting the caret in one is what counts as working on it;
+    // opening a note, reading it and scrolling past change nothing.
+    bool tidied = false;
     if (m_editedTableFirstBlock >= 0) {
         const QTextBlock edited = m_document->findBlockByNumber(m_editedTableFirstBlock);
         const bool stillInside = edited.isValid()
             && block.userState() == MarkdownHighlighter::TableRow
             && tableRunStart(block) == m_editedTableFirstBlock;
         if (!stillInside) {
-            const int firstBlock = m_editedTableFirstBlock;
             m_editedTableFirstBlock = -1;
             if (edited.isValid()) {
                 m_aligningTable = true;
-                alignTableAt(edited.position());
+                tidied = alignTableAt(edited.position());
                 m_aligningTable = false;
             }
-            Q_UNUSED(firstBlock)
         }
+    }
+
+    const bool followsLoad = m_cursorFollowsLoad;
+    m_cursorFollowsLoad = false;
+    if (!followsLoad && !m_aligningTable
+            && block.userState() == MarkdownHighlighter::TableRow) {
+        const int run = tableRunStart(block);
+        if (run >= 0)
+            m_editedTableFirstBlock = run;
     }
 
     m_activeBlockNumber = block.blockNumber();
@@ -943,6 +960,12 @@ void Backend::setCursorPosition(int position) {
     m_revealedFirstBlock = revealed.first;
     m_revealedLastBlock = revealed.second;
     m_highlighter->setRevealedRange(revealed.first, revealed.second);
+
+    // A table tidied on the way out only becomes a grid once the caret is
+    // recorded as outside it, so the rows it covers are worked out here rather
+    // than during the edit, when the caret was still in them.
+    if (tidied)
+        updateTableGrids();
 }
 
 QVariantMap Backend::viewState() const {
@@ -1039,6 +1062,8 @@ void Backend::loadDocumentText(const QString &text) {
     m_wordCountTimer.stop();
     setWordCount(countWords(text));
     updateCurrentTitle(text);
+    m_editedTableFirstBlock = -1;
+    m_cursorFollowsLoad = true;
     emit documentLoaded();
 }
 

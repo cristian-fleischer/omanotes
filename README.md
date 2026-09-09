@@ -93,11 +93,16 @@ spans. Replacing Lexilla means writing one more adapter.
 
 ## Tables
 
-A table is padded so its columns line up when you type in one and move the caret
-out, or on `Ctrl+Shift+T`. Never on open and never on a visit, so a file you only
-read stays byte for byte what it was, and one undo puts the table back as it was
-written. Column rules are drawn only through a table that lines up: half a grid
-reads worse than none.
+A table is padded so its columns line up when you move the caret out of one, or
+on `Ctrl+Shift+T`. Putting the caret in a table is what counts as working on it;
+opening a note, reading it and scrolling past change nothing, so a file you only
+read stays byte for byte what it was. One undo puts the table back as it was
+written, and a table that already lines up is left alone entirely rather than
+rewritten to the same bytes.
+
+Column rules are drawn only through a table that lines up: half a grid reads
+worse than none. A table with no grid keeps everything it was written with, the
+separator row included, because there is no rule drawn to stand in for it.
 
 ## The vault
 
