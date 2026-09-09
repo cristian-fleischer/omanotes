@@ -112,9 +112,11 @@ inside the notes, using ripgrep if it is installed and grep otherwise. Those two
 kinds of match are listed as two groups.
 
 A new note has no name yet, so it starts as a draft in `.omanotes/drafts` inside
-the folder it belongs to, never in the vault proper. Drafts get a section of
-their own at the top of the sidebar, labelled by their first line, and they are
-written as you type so the label survives switching notes and closing the app.
+the folder you made it in, never in the vault proper. Each folder holding drafts
+grows a `Drafts` row above its own folders and notes, which opens and closes
+like any other and stays closed if you leave it closed. Drafts are labelled by
+their first line, and are written as you type so the label survives switching
+notes and closing the app.
 Saving one names it and moves it out: `# Meeting notes` becomes
 `Meeting notes.md` in the folder that held the drafts directory. Save As offers
 the same name rather than "draft".

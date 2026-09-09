@@ -401,6 +401,12 @@ constexpr auto draftsFolderName = "drafts";
 constexpr auto stateFolderName = ".omanotes";
 }
 
+QString VaultModel::draftsRelativePath(const QString &relativeDir) {
+    const QString tail = QStringLiteral("%1/%2").arg(QLatin1String(stateFolderName),
+                                                     QLatin1String(draftsFolderName));
+    return relativeDir.isEmpty() ? tail : relativeDir + QLatin1Char('/') + tail;
+}
+
 QString VaultModel::draftsDirectoryFor(const QString &folder) {
     return QDir(folder).filePath(QStringLiteral("%1/%2")
                                      .arg(QLatin1String(stateFolderName),
@@ -597,18 +603,6 @@ void VaultModel::rebuildRows() {
         return;
     }
 
-    // Drafts have no place in the tree until they are named, so they get a
-    // section of their own above it.
-    QList<const Entry *> drafts;
-    for (const Entry &entry : m_entries) {
-        if (entry.draft)
-            drafts.append(&entry);
-    }
-    if (!drafts.isEmpty()) {
-        appendHeader(QStringLiteral("Drafts"));
-        for (const Entry *entry : std::as_const(drafts))
-            appendNote(*entry, 0);
-    }
 
     // Group the scanned files by their directory, and record every directory
     // under its own parent. Only folders that hold a note somewhere below them
@@ -616,11 +610,16 @@ void VaultModel::rebuildRows() {
     QHash<QString, QList<int>> files;
     QHash<QString, QStringList> subdirectories;
     QSet<QString> known;
+    m_draftsByDirectory.clear();
     for (int i = 0; i < m_entries.size(); ++i) {
-        if (m_entries.at(i).draft)
-            continue;
-        const QString directory = m_entries.at(i).relativeDir;
-        files[directory].append(i);
+        const Entry &entry = m_entries.at(i);
+        const QString directory = entry.relativeDir;
+        if (entry.draft)
+            m_draftsByDirectory[directory].append(i);
+        else
+            files[directory].append(i);
+        // A folder holding nothing but drafts is still a folder worth showing,
+        // or the draft you just made would have nowhere to appear.
         QString path = directory;
         while (!path.isEmpty() && !known.contains(path)) {
             known.insert(path);
@@ -645,6 +644,33 @@ void VaultModel::rebuildRows() {
 void VaultModel::appendDirectory(const QString &relativeDir, int depth,
                                  const QHash<QString, QList<int>> &files,
                                  const QHash<QString, QStringList> &subdirectories) {
+    // Drafts belong to the folder they were made in, above its folders and
+    // notes. The group opens and closes like any other folder, and its key is
+    // the real path of the directory holding them, so a closed one stays closed.
+    const QList<int> drafts = m_draftsByDirectory.value(relativeDir);
+    if (!drafts.isEmpty()) {
+        const QString key = draftsRelativePath(relativeDir);
+        Node group;
+        group.title = QStringLiteral("Drafts");
+        group.relativeDir = relativeDir;
+        group.relativePath = key;
+        group.path = QDir(m_canonicalRoot).filePath(key);
+        group.depth = depth;
+        group.directory = true;
+        group.draftsGroup = true;
+        m_rows.append(group);
+
+        if (!m_collapsedFolders.contains(key)) {
+            for (int index : drafts) {
+                const Entry &entry = m_entries.at(index);
+                Node node{entry.title, entry.relativeDir, entry.relativePath,
+                          entry.path, entry.modified, depth + 1, false, true, false};
+                m_rows.append(node);
+                ++m_visibleNotes;
+            }
+        }
+    }
+
     const QStringList children = subdirectories.value(relativeDir);
     for (const QString &child : children) {
         Node node;
@@ -729,6 +755,8 @@ QString VaultModel::relativeDirAt(int row) const {
     if (row < 0 || row >= m_rows.size())
         return {};
     const Node &node = m_rows.at(row);
+    if (node.draftsGroup)
+        return node.relativeDir;
     return node.directory ? node.relativePath : node.relativeDir;
 }
 

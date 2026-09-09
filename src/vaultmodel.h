@@ -141,10 +141,16 @@ private:
         bool draft = false;
         // A section label rather than anything you can open.
         bool header = false;
+        // The "Drafts" row a folder gets when it holds any. It behaves like a
+        // folder: it opens and closes, and it is not a note.
+        bool draftsGroup = false;
     };
 
     void scan();
     void scanDrafts(const QString &directory);
+    // Where a folder's drafts group sits, relative to the root. The real path
+    // of its directory, so collapsing it persists like any other folder.
+    static QString draftsRelativePath(const QString &relativeDir);
     void rebuildRows();
     void appendDirectory(const QString &relativeDir, int depth,
                          const QHash<QString, QList<int>> &files,
@@ -165,6 +171,8 @@ private:
     QString m_canonicalRoot;
     QList<Entry> m_entries;
     QList<Node> m_rows;
+    // Draft entries by the folder they belong to, for the group rows.
+    QHash<QString, QList<int>> m_draftsByDirectory;
     QSet<QString> m_collapsedFolders;
     QSet<QString> m_draftPaths;
     // Notes whose text matches the filter, found by ripgrep or grep. The

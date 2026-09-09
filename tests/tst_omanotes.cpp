@@ -1132,7 +1132,7 @@ private slots:
         QCOMPARE(model.rowForPath(model.pathAt(3)), 3);
 
         // A new note has no name yet, so it starts as a draft beside the vault
-        // rather than in it, and gets a section of its own at the top.
+        // rather than in it, under a Drafts row in the folder it was made in.
         const QString created = model.createNote();
         QVERIFY(!created.isEmpty());
         QCOMPARE(QFileInfo(created).fileName(), QStringLiteral("draft.md"));
@@ -1142,14 +1142,34 @@ private slots:
         QCOMPARE(VaultModel::folderForDraft(created), QDir(vault.path()).canonicalPath());
         QCOMPARE(QFileInfo(model.createNote()).fileName(), QStringLiteral("draft-2.md"));
         QCOMPARE(model.count(), 6);
-        QCOMPARE(roleOf(model, 0, VaultModel::IsHeaderRole).toBool(), true);
         QCOMPARE(roleOf(model, 0, VaultModel::TitleRole).toString(), QStringLiteral("Drafts"));
+        QVERIFY(roleOf(model, 0, VaultModel::IsDirectoryRole).toBool());
+        QCOMPARE(roleOf(model, 0, VaultModel::DepthRole).toInt(), 0);
         QCOMPARE(roleOf(model, 1, VaultModel::IsDraftRole).toBool(), true);
+        QCOMPARE(roleOf(model, 1, VaultModel::DepthRole).toInt(), 1);
+        // "New note here" on the group means the folder it belongs to, not the
+        // hidden directory the drafts are kept in.
+        QCOMPARE(model.relativeDirAt(0), QString());
 
-        // A draft in a subfolder keeps its own drafts folder there.
+        // A draft made in a subfolder appears in that subfolder's own group.
         const QString nested = model.createNote(QStringLiteral("projects"));
         QCOMPARE(VaultModel::folderForDraft(nested),
                  QDir(vault.path()).absoluteFilePath(QStringLiteral("projects")));
+        const int projectsRow = titlesOf(model).indexOf(QStringLiteral("projects"));
+        QVERIFY(projectsRow >= 0);
+        QCOMPARE(roleOf(model, projectsRow + 1, VaultModel::TitleRole).toString(),
+                 QStringLiteral("Drafts"));
+        QCOMPARE(roleOf(model, projectsRow + 1, VaultModel::DepthRole).toInt(), 1);
+        QCOMPARE(model.relativeDirAt(projectsRow + 1), QStringLiteral("projects"));
+        QCOMPARE(roleOf(model, projectsRow + 2, VaultModel::IsDraftRole).toBool(), true);
+        QCOMPARE(roleOf(model, projectsRow + 2, VaultModel::DepthRole).toInt(), 2);
+
+        // And the group closes like any other folder.
+        const int before = model.rowCount();
+        model.toggleExpanded(projectsRow + 1);
+        QCOMPARE(model.rowCount(), before - 1);
+        model.toggleExpanded(projectsRow + 1);
+        QCOMPARE(model.rowCount(), before);
     }
 
     void vaultModelMovesAndDeletes() {
