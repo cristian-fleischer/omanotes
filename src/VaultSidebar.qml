@@ -23,6 +23,9 @@ Rectangle {
     // What to call the open note while its file is still untitled.md, so a new
     // note is labelled by what you typed before you get round to saving it.
     property string placeholderTitle: ""
+    // Every row's label starts here, past the gutter the folder icons sit in,
+    // so a folder name and a note name at the same depth line up.
+    readonly property int labelGutter: scaledSize(20)
     // The row the keyboard and the menus act on, -1 for none.
     readonly property int selectedRow: list.currentIndex
 
@@ -491,7 +494,7 @@ Rectangle {
                     // beside and heads the rows rather than containing them.
                     Text {
                         visible: isHeader
-                        x: sidebar.scaledSize(10)
+                        x: sidebar.scaledSize(10) + sidebar.labelGutter
                         anchors.bottom: parent.bottom
                         anchors.bottomMargin: sidebar.scaledSize(4)
                         text: title
@@ -503,20 +506,29 @@ Rectangle {
                     // geometric shapes, and a fallback font puts a dot where
                     // the icon should be. Same 16-unit grid and stroke as the
                     // footer icons, so the two sets match.
-                    Canvas {
-                        id: disclosure
+                    // The canvas is drawn at the physical pixel size and
+                    // scaled back down, so it has to sit in an item of the
+                    // logical size: anchoring the canvas itself would centre a
+                    // box twice as tall as the icon that comes out of it.
+                    Item {
+                        id: folderIcon
                         x: entry.indent
                         anchors.verticalCenter: parent.verticalCenter
                         visible: isDirectory
+                        width: sidebar.scaledSize(16)
+                        height: sidebar.scaledSize(16)
+
+                    Canvas {
+                        id: disclosure
 
                         // Canvas rasterizes one surface pixel per logical pixel
                         // and is upscaled blurry on a hidpi screen. Draw at the
                         // physical size and scale the item back down.
                         readonly property real dpr: Screen.devicePixelRatio
                         readonly property bool open: isDirectory && isExpanded
-                        readonly property real unit: sidebar.scaledSize(14) / 16
-                        width: sidebar.scaledSize(14) * dpr
-                        height: sidebar.scaledSize(14) * dpr
+                        readonly property real unit: sidebar.scaledSize(16) / 16
+                        width: parent.width * dpr
+                        height: parent.height * dpr
                         transformOrigin: Item.TopLeft
                         scale: 1 / dpr
                         onOpenChanged: requestPaint()
@@ -563,6 +575,7 @@ Rectangle {
                             context.stroke();
                         }
                     }
+                    }
 
                     // A filled dot, the way an editor tab marks a dirty buffer.
                     Rectangle {
@@ -580,12 +593,13 @@ Rectangle {
 
                     Column {
                         visible: !isHeader
-                        x: entry.indent + (isDirectory ? sidebar.scaledSize(19) : 0)
+                        x: entry.indent + sidebar.labelGutter
                         width: entry.width - x - sidebar.scaledSize(24)
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: 1
 
                         Text {
+                            id: rowTitle
                             width: parent.width
                             text: isCurrent && sidebar.placeholderTitle.length > 0
                                 ? sidebar.placeholderTitle : title
