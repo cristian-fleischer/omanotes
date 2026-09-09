@@ -318,58 +318,73 @@ Rectangle {
 
             // Right-click on a row. What it offers depends on what the row is:
             // a folder can take a new note, a note can be moved or deleted.
+            // Two menus rather than one with rows switched off. A MenuItem
+            // that is not visible still takes its height in the menu's list,
+            // and a submenu's `visible` means whether its popup is showing
+            // rather than whether its row is, so the one menu came up with a
+            // column of empty space and a greyed-out "Move to" in the middle
+            // of it.
+            QtObject {
+                id: rowTarget
+                property string path: ""
+                property string title: ""
+                property string dir: ""
+                property bool hasDraft: false
+            }
+
+            function openRowMenu(row, item) {
+                if (!sidebar.vaultModel)
+                    return;
+                rowTarget.path = sidebar.vaultModel.pathAt(row);
+                rowTarget.dir = sidebar.vaultModel.relativeDirAt(row);
+                rowTarget.title = sidebar.vaultModel.titleAt(row);
+                rowTarget.hasDraft = sidebar.vaultModel.hasDraftAt(row);
+                if (sidebar.vaultModel.isDirectoryAt(row))
+                    folderMenu.popup(item);
+                else
+                    noteMenu.popup(item);
+            }
+
             Menu {
-                id: rowMenu
-                property string targetPath: ""
-                property string targetTitle: ""
-                property string targetDir: ""
-                property bool targetIsDirectory: false
-                property bool targetHasDraft: false
-
-                function openFor(row, item) {
-                    if (!sidebar.vaultModel)
-                        return;
-                    rowMenu.targetPath = sidebar.vaultModel.pathAt(row);
-                    rowMenu.targetDir = sidebar.vaultModel.relativeDirAt(row);
-                    rowMenu.targetIsDirectory = sidebar.vaultModel.isDirectoryAt(row);
-                    rowMenu.targetTitle = sidebar.vaultModel.titleAt(row);
-                    rowMenu.targetHasDraft = sidebar.vaultModel.hasDraftAt(row);
-                    rowMenu.popup(item);
-                }
-
+                id: folderMenu
+                objectName: "folderMenu"
                 MenuItem {
-                    text: rowMenu.targetIsDirectory ? "New note in this folder" : "New note here"
-                    onTriggered: sidebar.newNoteRequested(rowMenu.targetDir)
+                    text: "New note here"
+                    onTriggered: sidebar.newNoteRequested(rowTarget.dir)
                 }
-                MenuSeparator { visible: !rowMenu.targetIsDirectory }
+            }
+
+            Menu {
+                id: noteMenu
+                objectName: "noteMenu"
+                MenuItem {
+                    text: "New note here"
+                    onTriggered: sidebar.newNoteRequested(rowTarget.dir)
+                }
+                MenuSeparator {}
                 MenuItem {
                     text: "Discard unsaved changes\u2026"
-                    enabled: rowMenu.targetHasDraft
-                    visible: rowMenu.targetHasDraft
-                    onTriggered: sidebar.discardRequested(rowMenu.targetPath,
-                                                          rowMenu.targetTitle)
+                    visible: rowTarget.hasDraft
+                    height: visible ? implicitHeight : 0
+                    onTriggered: sidebar.discardRequested(rowTarget.path, rowTarget.title)
                 }
                 Menu {
                     title: "Move to"
-                    enabled: !rowMenu.targetIsDirectory
-                    visible: !rowMenu.targetIsDirectory
                     MenuItem {
                         text: "Vault root"
-                        onTriggered: sidebar.moveRequested(rowMenu.targetPath, "")
+                        onTriggered: sidebar.moveRequested(rowTarget.path, "")
                     }
                     Repeater {
                         model: sidebar.vaultModel ? sidebar.vaultModel.folders() : []
                         MenuItem {
                             text: modelData
-                            onTriggered: sidebar.moveRequested(rowMenu.targetPath, modelData)
+                            onTriggered: sidebar.moveRequested(rowTarget.path, modelData)
                         }
                     }
                 }
                 MenuItem {
                     text: "Delete\u2026"
-                    enabled: !rowMenu.targetIsDirectory
-                    visible: !rowMenu.targetIsDirectory
-                    onTriggered: sidebar.deleteRequested(rowMenu.targetPath, rowMenu.targetTitle)
+                    onTriggered: sidebar.deleteRequested(rowTarget.path, rowTarget.title)
                 }
             }
 
@@ -392,7 +407,7 @@ Rectangle {
                 TapHandler {
                     enabled: !isHeader
                     acceptedButtons: Qt.RightButton
-                    onSingleTapped: rowMenu.openFor(index, entry)
+                    onSingleTapped: list.openRowMenu(index, entry)
                 }
 
                 // Only a named note travels. target stays null so the row

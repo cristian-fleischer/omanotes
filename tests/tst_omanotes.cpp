@@ -291,6 +291,57 @@ private slots:
             QDir(vaultDirectory.path()).filePath(QStringLiteral("projects/Beta.md"))));
     }
 
+    // A MenuItem that is not visible still takes its height in the menu, and a
+    // submenu's `visible` is about its popup rather than its row, so one menu
+    // with rows switched off came up as a column of empty space. There are two
+    // menus now, and the one conditional row collapses to nothing.
+    void rowMenusHaveNoEmptyRows() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        QTemporaryDir vaultDirectory;
+        QVERIFY(vaultDirectory.isValid());
+        QVERIFY(writeNote(vaultDirectory.path(), QStringLiteral("Note.md")));
+        QVERIFY(writeNote(vaultDirectory.path(), QStringLiteral("projects/Beta.md")));
+
+        Backend backend;
+        VaultModel vault;
+        vault.setRoot(vaultDirectory.path());
+
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        engine.rootContext()->setContextProperty(QStringLiteral("vault"), &vault);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        QObject *list = window->findChild<QObject *>(QStringLiteral("vaultList"));
+        QObject *folderMenu = window->findChild<QObject *>(QStringLiteral("folderMenu"));
+        QObject *noteMenu = window->findChild<QObject *>(QStringLiteral("noteMenu"));
+        QVERIFY(list && folderMenu && noteMenu);
+
+        // A folder offers one thing, so its menu holds one row.
+        QCOMPARE(folderMenu->property("count").toInt(), 1);
+
+        // A note offers five, and the one that depends on the row takes no
+        // height when it does not apply.
+        QCOMPARE(noteMenu->property("count").toInt(), 5);
+        const int noteRow = vault.rowForPath(
+            QDir(vaultDirectory.path()).filePath(QStringLiteral("Note.md")));
+        QVERIFY(noteRow >= 0);
+        QVERIFY(!vault.hasDraftAt(noteRow));
+        QVERIFY(QMetaObject::invokeMethod(list, "openRowMenu", Q_ARG(QVariant, noteRow),
+                                          Q_ARG(QVariant, QVariant::fromValue(list))));
+
+        QQuickItem *discard = nullptr;
+        QVERIFY(QMetaObject::invokeMethod(noteMenu, "itemAt",
+                                          Q_RETURN_ARG(QQuickItem *, discard), Q_ARG(int, 2)));
+        QVERIFY(discard);
+        QCOMPARE(discard->property("visible").toBool(), false);
+        QCOMPARE(discard->property("height").toReal(), 0.0);
+    }
+
     void aTableAtTheEndOfANoteIsStillGridded() {
         const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
         QVERIFY(!mainQmlPath.isEmpty());
