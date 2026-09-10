@@ -33,6 +33,13 @@ ApplicationWindow {
     // takes a third of the width.
     readonly property int editorAreaWidth:
         Math.max(1, width - (sidebarVisible ? sidebarWidth : 0) - 48)
+    // Room inside the Flickable either side of the text column, taken out of
+    // the Flickable's own margin rather than added to it, so the column lands
+    // where it did. An inline code chip is the one thing drawn wider than the
+    // text it belongs to, and at full width the column is the whole area: with
+    // nothing to spill into, a chip at the start of a line lost its left edge
+    // to the clip.
+    readonly property int editorGutter: Math.max(4, Math.round(editorFontPixelSize * 0.25))
     readonly property int editorWidth: fullWidth ? editorAreaWidth : Math.min(
         Math.max(120,
                  Math.min(Math.round(writerFontMetrics.averageCharacterWidth * win.contentColumns),
@@ -724,8 +731,8 @@ ApplicationWindow {
             Flickable {
                 id: editorFlick
                 anchors.fill: parent
-                anchors.leftMargin: 24
-                anchors.rightMargin: 24
+                anchors.leftMargin: 24 - win.editorGutter
+                anchors.rightMargin: 24 - win.editorGutter
                 clip: true
                 contentWidth: width
                 contentHeight: Math.max(height, editor.y + editor.implicitHeight + 220)
