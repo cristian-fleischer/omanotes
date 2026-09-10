@@ -29,7 +29,8 @@ per-note drafts and the typography knobs described below.
 - Syntax highlighting inside fenced blocks, from a statically linked Lexilla
 - A vault sidebar: folder tree, filter, and content search through ripgrep
 - Per-note drafts that survive switching notes, closing the window and a crash
-- Tables padded into alignment on request, never on open
+- Tables padded into alignment on request, never on open, with cells that
+  carry their own bold, italic, links and code spans
 - Follows the desktop palette, dark mode and text size
 - Zoom, column width, fonts and line heights all in a plain INI file
 
@@ -137,6 +138,15 @@ rewritten to the same bytes.
 Column rules are drawn only through a table that lines up: half a grid reads
 worse than none. A table with no grid keeps everything it was written with, the
 separator row included, because there is no rule drawn to stand in for it.
+
+Cells carry bold, italic, strikethrough, links and code spans like the rest of a
+note. A column lines up because every glyph on the row has the same advance, and
+a monospace family keeps one advance across all four of its faces, so the styling
+itself moves nothing; the markers around it do go away, and the width they give
+up is added to the padding at the end of their own cell. Every cell therefore
+starts at its column, styled or not, and the pipes stay where the aligner put
+them. A row nobody has aligned has no padding to give, so its markers keep their
+width and only stop painting.
 
 ## The vault
 

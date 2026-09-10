@@ -1413,10 +1413,10 @@ private slots:
         // The row above the separator is the header, so it is bold as a whole.
         QCOMPARE(formatAt(document, 0, 2).fontWeight(), int(QFont::Bold));
 
-        // Emphasis inside a body cell is left as source, so columns stay
-        // aligned, and no marker is hidden there either.
+        // Emphasis inside a cell is styled like anywhere else; a cell with
+        // none of it is not.
         QVERIFY(formatAt(document, 2, 2).fontWeight() != int(QFont::Bold));
-        QVERIFY(MarkdownHighlighter::inlineMarkup(row).isEmpty());
+        QCOMPARE(MarkdownHighlighter::inlineMarkup(row).size(), 1);
         QCOMPARE(formatAt(document, 3, 8).fontWeight(), int(QFont::Bold));
 
         // The separator collapses only where a rule is drawn in its place, so
@@ -1431,6 +1431,84 @@ private slots:
 
         // Pipes are dimmed away from the content.
         QVERIFY(formatAt(document, 0, 0).foreground() != formatAt(document, 0, 2).foreground());
+    }
+
+    // A cell is styled like any other text. What would move a pipe is not the
+    // styling, since a monospace font has one advance across all four of its
+    // faces, but the markers coming out of the line, so the width they give up
+    // goes to the padding at the end of the cell they were in.
+    void tableCellsCarryTheirFormatting() {
+        QTextDocument document;
+        document.setDefaultFont(bodyFont());
+        MarkdownHighlighter highlighter(&document);
+        setDocumentText(document, QStringLiteral(
+            "| aaaaaaaaa | b |\n"
+            "|-----------|---|\n"
+            "| **bold**  | c |\n"
+            "| _slant_   | d |\n"
+            "| `code`    | e |\n"));
+
+        const auto lineWidth = [&document](int line) {
+            return document.findBlockByNumber(line).layout()->lineAt(0).naturalTextWidth();
+        };
+        const auto xOf = [&document](int line, int column) {
+            return document.findBlockByNumber(line).layout()->lineAt(0).cursorToX(column);
+        };
+        // The alignment guarantee: same characters, same width, whatever the
+        // markup does to them.
+        QCOMPARE(lineWidth(2), lineWidth(0));
+        QCOMPARE(lineWidth(3), lineWidth(0));
+        QCOMPARE(lineWidth(4), lineWidth(0));
+
+        // And the second pipe of every row sits under the second pipe of the
+        // header, so the column is a straight line down the page.
+        QCOMPARE(xOf(2, 12), xOf(0, 12));
+        QCOMPARE(xOf(3, 12), xOf(0, 12));
+        QCOMPARE(xOf(4, 12), xOf(0, 12));
+
+        // `| **bold**  | c |`: the content is bold, and it starts where the
+        // header's does. The markers around it take no width at all; the two
+        // characters they gave up are added to the padding at the end of the
+        // cell, which is what keeps the pipe in place.
+        QCOMPARE(formatAt(document, 2, 4).fontWeight(), int(QFont::Bold));
+        QCOMPARE(xOf(2, 4), xOf(0, 2));
+        const QTextCharFormat marker = formatAt(document, 2, 2);
+        QCOMPARE(marker.foreground().color().alpha(), 0);
+        QCOMPARE(marker.fontLetterSpacingType(), int(QFont::AbsoluteSpacing));
+        QVERIFY(marker.fontLetterSpacing() < 0.0);
+        const QTextCharFormat pad = formatAt(document, 2, 11);
+        QCOMPARE(pad.fontLetterSpacingType(), int(QFont::PercentageSpacing));
+        QCOMPARE(pad.fontLetterSpacing(), 500.0);
+
+        QVERIFY(formatAt(document, 3, 4).fontItalic());
+
+        // A code span keeps the chip but not the code font: a family with a
+        // different advance would take the column with it.
+        const QTextCharFormat code = formatAt(document, 4, 4);
+        const QTextCharFormat plain = formatAt(document, 0, 4);
+        QVERIFY(code.background() != plain.background());
+        QCOMPARE(code.fontFamilies().toStringList(), plain.fontFamilies().toStringList());
+
+        // Pipes are still pipes, not part of a cell's styling.
+        QVERIFY(formatAt(document, 2, 0).foreground() != formatAt(document, 2, 4).foreground());
+
+        // The caret in the table puts the whole of it back to source.
+        highlighter.setRevealedRange(0, 4);
+        QCOMPARE(formatAt(document, 2, 4).fontWeight(), int(QFont::Normal));
+        QVERIFY(formatAt(document, 2, 2).foreground().color().alpha() > 0);
+        highlighter.setRevealedRange(-1, -1);
+        QCOMPARE(formatAt(document, 2, 4).fontWeight(), int(QFont::Bold));
+
+        // A row nobody has aligned has no padding to hand the width to, so its
+        // markers keep their cell and only stop painting.
+        setDocumentText(document, QStringLiteral(
+            "|a|**b**|\n"
+            "|-|-|\n"
+            "|c|**d**|\n"));
+        const QTextCharFormat tight = formatAt(document, 2, 3);
+        QCOMPARE(tight.foreground().color().alpha(), 0);
+        QVERIFY(!tight.hasProperty(QTextFormat::FontLetterSpacing));
+        QCOMPARE(lineWidth(2), lineWidth(0));
     }
 
     // A hidden marker cancels its own advance, which is right for `**` but

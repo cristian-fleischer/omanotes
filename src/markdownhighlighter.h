@@ -137,6 +137,8 @@ private:
     int highlightCode(const QString &text, int languageIndex, int previousState);
     int languageIndexFor(const QString &language);
     bool highlightTableRow(const QString &text);
+    void highlightTableMarkup(const QString &text);
+    void foldMarkersInCell(const QString &text, int start, int end, const QList<Span> &markers);
     bool highlightMarkers(const QString &text);
     void highlightSetextContent(const QString &text);
     void highlightInline(const QString &text);
@@ -174,6 +176,7 @@ private:
     QTextCharFormat m_tablePipeFormat;
     QTextCharFormat m_tableSeparatorFormat;
     QTextCharFormat m_tableHeaderFormat;
+    qreal m_tableMarkerSpacing = 0.0;
     QTextCharFormat m_quoteFormat;
     QTextCharFormat m_linkFormat;
     QList<int> m_pendingSetextBlocks;

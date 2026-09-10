@@ -21,11 +21,11 @@ and a [link](https://github.com/cristian-fleischer/omanotes).
 
 ## Table
 
-| Month    | Savings | Note                  |
-|----------|---------|-----------------------|
-| January  | $250    | opening balance       |
-| February | $80     | Ctrl+Shift+T lines up |
-| March    | $420    | the pipes are in here |
+| Month    | Savings  | Note                    |
+|----------|----------|-------------------------|
+| January  | **$250** | opening balance         |
+| February | $80      | `Ctrl+Shift+T` lines up |
+| March    | **$420** | _the pipes stay put_    |
 
 ## Code
 

@@ -500,10 +500,14 @@ QVariantList Backend::hiddenRangesAt(int position) const {
     const int lineStart = block.position();
     QList<QPair<int, int>> spans;
     // A line inside a fence has no hidden markers, so the caret must not skip
-    // over the asterisks in a shell glob.
+    // over the asterisks in a shell glob. Nor does a table row: the caret being
+    // in the table is what puts it back to source, markers and all, so there is
+    // nothing there to skip over.
     const QList<MarkdownHighlighter::InlineMarkup> markup =
-        MarkdownHighlighter::inlineMarkup(
-            block.text(), MarkdownHighlighter::isFencedState(block.userState()));
+        MarkdownHighlighter::isTableRow(block.text())
+            ? QList<MarkdownHighlighter::InlineMarkup>()
+            : MarkdownHighlighter::inlineMarkup(
+                  block.text(), MarkdownHighlighter::isFencedState(block.userState()));
     for (const MarkdownHighlighter::InlineMarkup &item : markup) {
         for (const MarkdownHighlighter::Span &marker : item.markers) {
             spans.append({lineStart + marker.start,

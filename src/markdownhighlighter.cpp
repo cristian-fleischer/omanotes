@@ -486,6 +486,16 @@ void MarkdownHighlighter::rebuildFormats() {
     m_tableHeaderFormat = m_tableFormat;
     m_tableHeaderFormat.setFontWeight(QFont::Bold);
 
+    // What a marker inside a table cell has to give back to come out at zero
+    // width. Measured in the table's own family, not the editor's: the two are
+    // often different fonts, and a metric off by a fraction of a pixel per
+    // marker walks the pipes out of line down a long table.
+    QFont tableMarkerFont;
+    tableMarkerFont.setFamilies(m_tableFamilies);
+    tableMarkerFont.setPointSizeF(1.0);
+    m_tableMarkerSpacing =
+        -QFontMetricsF(tableMarkerFont).horizontalAdvance(QLatin1Char('*'));
+
     m_quoteFormat = QTextCharFormat();
     m_quoteFormat.setForeground(quote);
     m_quoteFormat.setFontItalic(true);
@@ -672,25 +682,121 @@ bool MarkdownHighlighter::highlightTableRow(const QString &text) {
     }
 
     // The row above a separator is the header.
-    if (isTableSeparator(currentBlock().next().text())) {
-        setFormat(0, text.length(), m_tableHeaderFormat);
-        for (int i = 0; i < text.length(); ++i) {
-            if (text.at(i) == QLatin1Char('|'))
-                setFormat(i, 1, pipeFormat);
-        }
-        return true;
-    }
+    const bool header = isTableSeparator(currentBlock().next().text());
+    setFormat(0, text.length(), header ? m_tableHeaderFormat : m_tableFormat);
 
-    // Columns only line up while nothing on the line changes an advance width,
-    // so inline styling does not run over a table row. inlineMarkup() skips
-    // table rows for the same reason, which keeps the caret and the hidden
-    // markers in agreement.
-    setFormat(0, text.length(), m_tableFormat);
+    // A monospace font has one advance across all four of its faces, so bold
+    // and italic move nothing on their own; what would move a pipe is the
+    // markers going away, and foldMarkersInCell() gives that width back. While
+    // the caret is in the table the whole of it reads as source instead.
+    if (!active)
+        highlightTableMarkup(text);
+
     for (int i = 0; i < text.length(); ++i) {
         if (text.at(i) == QLatin1Char('|'))
             setFormat(i, 1, pipeFormat);
     }
     return true;
+}
+
+void MarkdownHighlighter::highlightTableMarkup(const QString &text) {
+    const QList<InlineMarkup> markup = inlineMarkup(text);
+    QList<Span> markers;
+    for (const InlineMarkup &item : markup) {
+        if (item.kind == InlineKind::Heading)
+            continue;
+
+        QTextCharFormat merged = format(item.content.start);
+        switch (item.kind) {
+        case InlineKind::Bold:
+            merged.setFontWeight(QFont::Bold);
+            break;
+        case InlineKind::Italic:
+            merged.setFontItalic(true);
+            break;
+        case InlineKind::BoldItalic:
+            merged.setFontWeight(QFont::Bold);
+            merged.setFontItalic(true);
+            break;
+        case InlineKind::Strikethrough:
+            merged.setFontStrikeOut(true);
+            break;
+        case InlineKind::Link:
+        case InlineKind::Image:
+            merged.setFontUnderline(true);
+            merged.setForeground(m_linkFormat.foreground());
+            break;
+        case InlineKind::Code:
+            // The chip, but not the code font: a family with a different
+            // advance would take the column with it.
+            merged.setBackground(m_codeFormat.background());
+            break;
+        case InlineKind::Heading:
+            break;
+        }
+        setFormat(item.content.start, item.content.length, merged);
+        for (const Span &marker : item.markers) {
+            if (marker.length > 0)
+                markers.append(marker);
+        }
+    }
+
+    // A cell runs from one pipe to the next.
+    int cellStart = 0;
+    for (int i = 0; i <= text.length(); ++i) {
+        if (i < text.length() && text.at(i) != QLatin1Char('|'))
+            continue;
+        foldMarkersInCell(text, cellStart, i, markers);
+        cellStart = i + 1;
+    }
+}
+
+// Markup in a table cell has to disappear without moving a pipe. Dropping the
+// markers to zero width would pull the rest of the row left, so the width they
+// give up is handed to the space the aligner left at the end of the cell: every
+// cell still starts at its column, whether or not it is styled, and the slack
+// collects where padding already is.
+//
+// That space is widened by a whole multiple of its own advance rather than by a
+// pixel figure, so the arithmetic needs no metric and holds at any zoom. Spread
+// over the whole run of padding it would be a fraction instead, and Qt rounds an
+// advance to a 64th of a pixel: a few rows of that and the column is ragged. A
+// cell with no padding to give (a row nobody has aligned) keeps its markers at
+// full width, painted transparent.
+void MarkdownHighlighter::foldMarkersInCell(const QString &text, int start, int end,
+                                            const QList<Span> &markers) {
+    int hidden = 0;
+    for (const Span &marker : markers) {
+        if (marker.start >= start && marker.start + marker.length <= end)
+            hidden += marker.length;
+    }
+    if (hidden == 0)
+        return;
+
+    int padding = 0;
+    while (end - padding - 1 >= start && text.at(end - padding - 1) == QLatin1Char(' '))
+        ++padding;
+
+    for (const Span &marker : markers) {
+        if (marker.start < start || marker.start + marker.length > end)
+            continue;
+        QTextCharFormat blank = format(marker.start);
+        blank.setForeground(QColor(Qt::transparent));
+        if (padding > 0) {
+            blank.setFontPointSize(1.0);
+            blank.setFontLetterSpacingType(QFont::AbsoluteSpacing);
+            blank.setFontLetterSpacing(m_tableMarkerSpacing);
+        }
+        setFormat(marker.start, marker.length, blank);
+    }
+
+    if (padding == 0)
+        return;
+
+    QTextCharFormat wide = format(end - 1);
+    wide.setFontLetterSpacingType(QFont::PercentageSpacing);
+    wide.setFontLetterSpacing(100.0 * (1 + hidden));
+    setFormat(end - 1, 1, wide);
 }
 
 void MarkdownHighlighter::highlightSearch(const QString &text) {
@@ -884,9 +990,10 @@ void MarkdownHighlighter::highlightInline(const QString &text) {
 QList<MarkdownHighlighter::InlineMarkup>
 MarkdownHighlighter::inlineMarkup(const QString &text, bool insideFencedCode) {
     QList<InlineMarkup> markup;
-    // Code is not Markdown, and a table row is left alone so its columns stay
-    // aligned. Neither hides a marker, so neither may report one.
-    if (insideFencedCode || isFenceLine(text) || isTableRow(text))
+    // Code is not Markdown, and it hides no marker, so it may report none.
+    // A table row does report its markup: the row is styled, and its markers
+    // are painted invisibly rather than folded away, so nothing moves.
+    if (insideFencedCode || isFenceLine(text))
         return markup;
 
     if (!text.contains(QLatin1Char('*')) && !text.contains(QLatin1Char('_'))
