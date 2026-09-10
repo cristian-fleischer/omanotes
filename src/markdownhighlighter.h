@@ -58,6 +58,12 @@ public:
     enum class InlineKind { Bold, Italic, BoldItalic, Strikethrough, Link, Image,
                             Heading, Code };
 
+    // Marks the characters of an inline code span. The chip behind them is not
+    // a character background, which Qt Quick paints as one square per glyph
+    // run: it is a rounded rectangle drawn behind the editor, and this is how
+    // Backend::inlineCodeRegions() finds what to draw it around.
+    static constexpr int InlineCodeProperty = QTextFormat::UserProperty + 1;
+
     struct InlineMarkup {
         InlineKind kind;
         Span content;
@@ -108,12 +114,12 @@ public:
     QStringList codeFamilies() const { return m_codeFamilies; }
 
     // A step away from the page's own colour rather than a fixed grey, so the
-    // code slab keeps the palette's hue whatever the wallpaper does. The fenced
-    // slab is drawn behind the editor from QML; inline code uses it as a
-    // character background.
+    // slab keeps the palette's hue whatever the wallpaper does. Both are drawn
+    // behind the editor from QML rather than set as a character background,
+    // which Qt Quick paints as one square per glyph run.
     static QColor codeBackgroundFor(const QString &pageBackground, bool darkMode);
     // Inline code sits on top of the page rather than in it, so its chip is
-    // brighter where the block slab is darker.
+    // lifted where the block slab is let in.
     static QColor inlineCodeBackgroundFor(const QString &pageBackground, bool darkMode);
 
     // The colour list markers, pipes and fences are drawn in, so anything

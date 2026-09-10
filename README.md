@@ -104,7 +104,7 @@ The buffer is always your Markdown. These are drawn over it, never in it.
 | `# ` to `###### ` | Six heading sizes, 1.9x down to 1.0x, the deeper ones fading. Markers hidden. |
 | `**b**`, `*i*`, `***bi***`, `~~s~~` | Bold, italic, both, struck through. Markers hidden. |
 | `[text](url)`, `![alt](src)` | The text, underlined in the accent colour. Ctrl+click opens it. |
-| `` `code` `` | A chip a step brighter than the page, the backticks holding a space of it either side rather than showing. |
+| `` `code` `` | A rounded chip drawn behind the code, in the shade the sidebar uses. Backticks hidden. |
 | ` ```lang ` | A slab behind the code, syntax highlighted, the fence rows folded away. |
 | `---`, `***`, `___` | A rule across the page, which goes while the caret is on the line: `***` opens bold italic too. |
 | `* item` | A bullet drawn in the asterisk's own cell. `-` and `+` are left alone. |
@@ -113,6 +113,9 @@ The buffer is always your Markdown. These are drawn over it, never in it.
 
 Anything folded away comes back when the caret is on its line, or anywhere
 inside the fenced block, so it can still be edited.
+
+Emphasis may wrap a code span, so ``**`x`**`` is bold code. It may not start or
+end inside one: a `*` between backticks is a character.
 
 ## Syntax highlighting
 

@@ -22,11 +22,13 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLockFile>
+#include <QAbstractTextDocumentLayout>
 #include <QSaveFile>
 #include <QTextBlock>
 #include <QTextBlockFormat>
 #include <QTextCursor>
 #include <QTextDocument>
+#include <QTextLayout>
 #include <QTextStream>
 #include <QUrl>
 #include <QVariantMap>
@@ -1714,6 +1716,88 @@ QVariantList Backend::fencedCodeRegions() const {
                                    {QStringLiteral("end"), previous.position()}});
     }
     return regions;
+}
+
+// What a character format is actually drawn in: the document's font, with
+// whatever the format overrides of it. A QTextCharFormat on its own carries
+// only the overrides, so its own font() has a default size rather than the
+// page's, and a heading's code span would be measured as body text.
+static QFont fontForFormat(const QTextCharFormat &format, const QTextDocument *document) {
+    QFont font = document->defaultFont();
+    if (format.hasProperty(QTextFormat::FontFamilies))
+        font.setFamilies(format.fontFamilies().toStringList());
+    if (format.hasProperty(QTextFormat::FontPointSize) && format.fontPointSize() > 0.0)
+        font.setPointSizeF(format.fontPointSize());
+    return font;
+}
+
+// The chip behind an inline code span. It cannot be a character background:
+// Qt Quick's text node paints one square per glyph run, which is what the
+// fenced slab ran into as well, so the shape is drawn behind the editor from
+// QML and this says where. The highlighter marks the characters it styled, so
+// what is chipped is decided in one place rather than parsed twice.
+QVariantList Backend::inlineCodeRegions() const {
+    QVariantList regions;
+    if (!m_document)
+        return regions;
+
+    QAbstractTextDocumentLayout *layout = m_document->documentLayout();
+    for (QTextBlock block = m_document->begin(); block.isValid(); block = block.next()) {
+        QTextLayout *blockLayout = block.layout();
+        if (!blockLayout || blockLayout->lineCount() == 0)
+            continue;
+
+        // Runs of marked characters, coalesced: the content of a span arrives
+        // as one format range and anything merged over it as another. They come
+        // off the layout rather than off the block: a highlighter's formats are
+        // laid over the text, and QTextBlock::textFormats() reports what the
+        // document itself holds, which for a plain-text buffer is nothing.
+        QList<QPair<int, int>> spans;
+        QList<QTextCharFormat> formats;
+        for (const QTextLayout::FormatRange &range : blockLayout->formats()) {
+            if (!range.format.boolProperty(MarkdownHighlighter::InlineCodeProperty))
+                continue;
+            if (!spans.isEmpty() && spans.last().second == range.start) {
+                spans.last().second = range.start + range.length;
+            } else {
+                spans.append({range.start, range.start + range.length});
+                formats.append(range.format);
+            }
+        }
+        if (spans.isEmpty())
+            continue;
+
+        const QPointF origin = layout->blockBoundingRect(block).topLeft();
+        for (int s = 0; s < spans.size(); ++s) {
+            // The chip hugs the glyphs rather than filling the line, which at a
+            // prose line height of 140 is half as tall again. The baseline is
+            // the fixed point: whatever the leading does to the line box, the
+            // text sits at line.y() + line.ascent().
+            const QFontMetricsF metrics(fontForFormat(formats.at(s), m_document));
+            for (int i = 0; i < blockLayout->lineCount(); ++i) {
+                const QTextLine line = blockLayout->lineAt(i);
+                const int lineStart = line.textStart();
+                const int start = qMax(spans.at(s).first, lineStart);
+                const int end = qMin(spans.at(s).second, lineStart + line.textLength());
+                if (start >= end)
+                    continue;
+
+                const qreal left = line.cursorToX(start);
+                const qreal right = line.cursorToX(end);
+                const qreal baseline = origin.y() + line.y() + line.ascent();
+                regions.append(QVariantMap{
+                    {QStringLiteral("x"), origin.x() + qMin(left, right)},
+                    {QStringLiteral("y"), baseline - metrics.ascent()},
+                    {QStringLiteral("width"), qAbs(right - left)},
+                    {QStringLiteral("height"), metrics.ascent() + metrics.descent()}});
+            }
+        }
+    }
+    return regions;
+}
+
+QString Backend::themeInlineCodeBackground() const {
+    return MarkdownHighlighter::inlineCodeBackgroundFor(m_themeBackground, m_darkMode).name();
 }
 
 void Backend::applyDocumentTypography() {

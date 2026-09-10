@@ -1,4 +1,5 @@
 #include <QtTest>
+#include <QAbstractTextDocumentLayout>
 #include <QFont>
 #include <QTextBlock>
 #include <QTextDocument>
@@ -394,6 +395,94 @@ private slots:
         // resetting the setting.
         QVERIFY(QMetaObject::invokeMethod(window.data(), "toggleSidebar"));
         QSettings().setValue(QStringLiteral("vault/sidebarVisible"), false);
+    }
+
+    // Emphasis around a code span is emphasis; emphasis that starts inside one
+    // is text. Reading both as a clash left ``**`x`**`` showing its asterisks.
+    void emphasisCanWrapACodeSpan() {
+        QTextDocument document;
+        document.setDefaultFont(bodyFont());
+        MarkdownHighlighter highlighter(&document);
+        setDocumentText(document, QStringLiteral("**`x`** and `a*b*c` and *`y`*\n"));
+
+        // `**` wraps the whole span, so the run is bold, chipped, and the
+        // asterisks are gone.
+        const QTextCharFormat wrapped = formatAt(document, 0, 3);
+        QCOMPARE(wrapped.fontWeight(), int(QFont::Bold));
+        QVERIFY(wrapped.boolProperty(MarkdownHighlighter::InlineCodeProperty));
+        QCOMPARE(formatAt(document, 0, 0).fontPointSize(), 1.0);
+
+        // The asterisks inside the ticks are characters, not markers.
+        const int literal = document.firstBlock().text().indexOf(QLatin1Char('*'), 4);
+        QVERIFY(literal > 0);
+        QVERIFY(!formatAt(document, 0, literal).fontItalic());
+        QVERIFY(formatAt(document, 0, literal).foreground().color().alpha() > 0);
+
+        // One marker either side works the same way.
+        const int single = document.firstBlock().text().lastIndexOf(QLatin1String("*`y`*"));
+        QVERIFY(single > 0);
+        QVERIFY(formatAt(document, 0, single + 2).fontItalic());
+        QVERIFY(formatAt(document, 0, single + 2)
+                    .boolProperty(MarkdownHighlighter::InlineCodeProperty));
+    }
+
+    // The chip is a rounded rectangle drawn behind the editor, so the geometry
+    // has to come out of the layout rather than out of a character background.
+    void inlineCodeChipsFollowTheText() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("chips.md"));
+        QFile seed(path);
+        QVERIFY(seed.open(QIODevice::WriteOnly));
+        seed.write("`code` starts the line\n"
+                   "\n"
+                   "# `head`\n"
+                   "\n"
+                   "no code here at all\n");
+        seed.close();
+
+        QQmlEngine engine;
+        QScopedPointer<QObject> editor(createEditor(&engine));
+        QVERIFY(editor);
+        editor->setProperty("width", 600);
+        Backend backend;
+        backend.attachDocument(editor->property("textDocument").value<QObject *>());
+        backend.open(QUrl::fromLocalFile(path));
+
+        QTextDocument *document =
+            qobject_cast<QQuickTextDocument *>(
+                editor->property("textDocument").value<QObject *>())->textDocument();
+        QVERIFY(document);
+        (void)document->size();
+
+        const QVariantList chips = backend.inlineCodeRegions();
+        QCOMPARE(chips.size(), 2);
+        const QVariantMap body = chips.at(0).toMap();
+        const QVariantMap heading = chips.at(1).toMap();
+
+        // The chip is drawn around the code, not around the backticks: a
+        // folded marker takes no width, so a span that opens the line starts
+        // where the line starts.
+        const QRectF firstBlock =
+            document->documentLayout()->blockBoundingRect(document->findBlockByNumber(0));
+        // (Within a fraction of a pixel: a folded marker cancels its own
+        // advance from a metric taken at one point, which does not divide
+        // exactly into the advance it is cancelling.)
+        QVERIFY(qAbs(body.value(QStringLiteral("x")).toReal() - firstBlock.x()) < 0.5);
+        QVERIFY(body.value(QStringLiteral("width")).toReal() > 0.0);
+
+        // Each chip sits on its own block, and a heading's is the taller of the
+        // two because the code in it is heading-sized.
+        const QRectF headingBlock =
+            document->documentLayout()->blockBoundingRect(document->findBlockByNumber(2));
+        QVERIFY(body.value(QStringLiteral("y")).toReal() >= firstBlock.y());
+        QVERIFY(heading.value(QStringLiteral("y")).toReal() >= headingBlock.y());
+        QVERIFY(heading.value(QStringLiteral("height")).toReal()
+                > body.value(QStringLiteral("height")).toReal());
+
+        // And it hugs the text rather than filling the line, which at a prose
+        // line height of 140 is half as tall again.
+        QVERIFY(body.value(QStringLiteral("height")).toReal() < firstBlock.height());
     }
 
     void rowMenusHaveNoEmptyRows() {
@@ -1486,7 +1575,8 @@ private slots:
         // different advance would take the column with it.
         const QTextCharFormat code = formatAt(document, 4, 4);
         const QTextCharFormat plain = formatAt(document, 0, 4);
-        QVERIFY(code.background() != plain.background());
+        QVERIFY(code.boolProperty(MarkdownHighlighter::InlineCodeProperty));
+        QVERIFY(!plain.boolProperty(MarkdownHighlighter::InlineCodeProperty));
         QCOMPARE(code.fontFamilies().toStringList(), plain.fontFamilies().toStringList());
 
         // Pipes are still pipes, not part of a cell's styling.
@@ -2641,20 +2731,22 @@ private slots:
         const QTextCharFormat headingCode = formatAt(document, 0, 5);
         const QTextCharFormat bodyCode = formatAt(document, 2, 6);
 
-        // The code span carries the chip background and the monospace family.
-        QVERIFY(headingCode.background() != heading.background());
-        QCOMPARE(headingCode.background(), bodyCode.background());
+        // The code span is marked for the chip and carries the monospace
+        // family. The chip itself is drawn behind the editor, not set as a
+        // character background, so what the format holds is the mark.
+        QVERIFY(!heading.boolProperty(MarkdownHighlighter::InlineCodeProperty));
+        QVERIFY(headingCode.boolProperty(MarkdownHighlighter::InlineCodeProperty));
+        QVERIFY(bodyCode.boolProperty(MarkdownHighlighter::InlineCodeProperty));
         QCOMPARE(headingCode.fontFamilies().toStringList(),
                  bodyCode.fontFamilies().toStringList());
         // And it is still heading-sized, which is larger than code in prose.
         QVERIFY(headingCode.fontPointSize() > bodyCode.fontPointSize());
 
-        // The backticks keep their cells and paint nothing, so the chip has a
-        // space of its own either side of the code rather than clamping to it.
+        // The backticks fold away like every other marker, and are not part of
+        // what the chip is drawn around.
         const QTextCharFormat tick = formatAt(document, 2, 5);
-        QCOMPARE(tick.background(), bodyCode.background());
-        QCOMPARE(tick.foreground().color().alpha(), 0);
-        QVERIFY(!tick.hasProperty(QTextFormat::FontLetterSpacing));
+        QVERIFY(!tick.boolProperty(MarkdownHighlighter::InlineCodeProperty));
+        QCOMPARE(tick.fontPointSize(), 1.0);
     }
 
     void loadsCurrentOmarchyTheme() {

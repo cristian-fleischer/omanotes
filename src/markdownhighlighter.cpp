@@ -226,9 +226,24 @@ static QColor pageShade(const QString &pageBackground, bool darkMode, qreal step
 
 QColor MarkdownHighlighter::inlineCodeBackgroundFor(const QString &pageBackground,
                                                     bool darkMode) {
-    // Brighter than the page, so a span reads as a chip laid on the text. The
-    // block slab goes the other way, as a panel let into the page.
-    return pageShade(pageBackground, darkMode, 0.09);
+    // The same surface as the sidebar: white laid over the page in the dark,
+    // black over it in the light, which lifts the shade without carrying the
+    // page's saturation up with it. A lightness step in HSL keeps the
+    // saturation, and on a blue page that came out as a blue block.
+    //
+    // Twice the sidebar's fraction, because the sidebar is a panel the width of
+    // the window and a chip is five characters. The same step reads as a
+    // surface at one size and as nothing at the other.
+    QColor base(pageBackground);
+    if (!base.isValid()) {
+        base = darkMode ? QColor(QStringLiteral("#101010"))
+                        : QColor(QStringLiteral("#ffffff"));
+    }
+    const QColor over = darkMode ? QColor(Qt::white) : QColor(Qt::black);
+    const qreal weight = darkMode ? 0.09 : 0.07;
+    return QColor::fromRgbF(base.redF() * (1 - weight) + over.redF() * weight,
+                            base.greenF() * (1 - weight) + over.greenF() * weight,
+                            base.blueF() * (1 - weight) + over.blueF() * weight);
 }
 
 QColor MarkdownHighlighter::codeBackgroundFor(const QString &pageBackground, bool darkMode) {
@@ -349,8 +364,6 @@ void MarkdownHighlighter::rebuildFormats() {
     const QColor link = !m_customAccent.isEmpty() ? QColor(m_customAccent)
         : (m_darkMode ? QColor(QStringLiteral("#5584aa")) : QColor(QStringLiteral("#2077b2")));
     const QColor quote = marker;
-    const QColor inlineCodeBackground =
-        inlineCodeBackgroundFor(m_customBackground, m_darkMode);
 
     m_formatFont = document() ? document()->defaultFont() : QFont();
 
@@ -464,7 +477,7 @@ void MarkdownHighlighter::rebuildFormats() {
 
     m_codeFormat = QTextCharFormat();
     m_codeFormat.setForeground(text);
-    m_codeFormat.setBackground(inlineCodeBackground);
+    m_codeFormat.setProperty(InlineCodeProperty, true);
     m_codeFormat.setFontFamilies(m_codeFamilies);
 
     m_codeBlockFormat = QTextCharFormat();
@@ -729,7 +742,7 @@ void MarkdownHighlighter::highlightTableMarkup(const QString &text) {
         case InlineKind::Code:
             // The chip, but not the code font: a family with a different
             // advance would take the column with it.
-            merged.setBackground(m_codeFormat.background());
+            merged.setProperty(InlineCodeProperty, true);
             break;
         case InlineKind::Heading:
             break;
@@ -962,7 +975,7 @@ void MarkdownHighlighter::highlightInline(const QString &text) {
             case InlineKind::Code:
                 merged.setFontFamilies(m_codeFormat.fontFamilies().toStringList());
                 merged.setForeground(m_codeFormat.foreground());
-                merged.setBackground(m_codeFormat.background());
+                merged.setProperty(InlineCodeProperty, true);
                 break;
             case InlineKind::Heading:
                 break;
@@ -970,20 +983,11 @@ void MarkdownHighlighter::highlightInline(const QString &text) {
             setFormat(item.content.start, item.content.length, merged);
         }
 
-        for (const Span &marker : item.markers) {
-            if (item.kind != InlineKind::Code) {
-                setFormat(marker.start, marker.length, m_hiddenMarkerFormat);
-                continue;
-            }
-            // A backtick keeps its cell and paints nothing, so what is left is
-            // a space of chip either side of the code. Collapsing it instead
-            // would leave the chip clamped to the text and reflow the line
-            // every time the caret passed through.
-            QTextCharFormat padding = format(marker.start);
-            padding.setForeground(QColor(Qt::transparent));
-            padding.setBackground(m_codeFormat.background());
-            setFormat(marker.start, marker.length, padding);
-        }
+        // Backticks fold away like every other marker. The space either side
+        // of a chip is padding on the rectangle drawn behind it, so it does not
+        // depend on how wide a backtick happens to be.
+        for (const Span &marker : item.markers)
+            setFormat(marker.start, marker.length, m_hiddenMarkerFormat);
     }
 }
 
@@ -1016,10 +1020,17 @@ MarkdownHighlighter::inlineMarkup(const QString &text, bool insideFencedCode) {
         while (codeMatches.hasNext())
             code.append(span(codeMatches.next(), 0));
     }
-    const auto insideCode = [&code](const Span &candidate) {
+    // A code span binds tighter than anything around it, so markup that starts
+    // or ends inside one is not markup: `` `a*b` `` is literal. Markup that
+    // wraps a whole code span is a different case and is allowed, which is what
+    // makes ``**`x`**`` bold code rather than two literal asterisks.
+    const auto clashesWithCode = [&code](const Span &candidate) {
         for (const Span &taken : code) {
-            if (candidate.start < taken.start + taken.length
-                    && taken.start < candidate.start + candidate.length)
+            const int candidateEnd = candidate.start + candidate.length;
+            const int takenEnd = taken.start + taken.length;
+            const bool overlaps = candidate.start < takenEnd && taken.start < candidateEnd;
+            const bool wraps = candidate.start <= taken.start && takenEnd <= candidateEnd;
+            if (overlaps && !wraps)
                 return true;
         }
         return false;
@@ -1034,11 +1045,6 @@ MarkdownHighlighter::inlineMarkup(const QString &text, bool insideFencedCode) {
         markup.append({InlineKind::Heading, span(heading, 3),
                        {{0, markerLength}, {int(text.length()), 0}},
                        int(heading.capturedLength(1))});
-    }
-
-    for (const Span &span : std::as_const(code)) {
-        markup.append({InlineKind::Code, {span.start + 1, span.length - 2},
-                       {{span.start, 1}, {span.start + span.length - 1, 1}}});
     }
 
     // `***both***` first, and its span is then off limits to the bold and
@@ -1063,7 +1069,7 @@ MarkdownHighlighter::inlineMarkup(const QString &text, bool insideFencedCode) {
         while (matches.hasNext()) {
             const QRegularExpressionMatch match = matches.next();
             const Span whole = span(match, 0);
-            if (insideEmphasis(whole) || insideCode(whole))
+            if (insideEmphasis(whole) || clashesWithCode(whole))
                 continue;
             if (kind == InlineKind::BoldItalic)
                 emphasised.append(whole);
@@ -1096,7 +1102,7 @@ MarkdownHighlighter::inlineMarkup(const QString &text, bool insideFencedCode) {
     while (strikeMatches.hasNext()) {
         const QRegularExpressionMatch match = strikeMatches.next();
         const Span whole = span(match, 0);
-        if (insideCode(whole))
+        if (clashesWithCode(whole))
             continue;
         markup.append({InlineKind::Strikethrough, span(match, 1),
                        {{whole.start, 2}, {whole.start + whole.length - 2, 2}}});
@@ -1111,7 +1117,7 @@ MarkdownHighlighter::inlineMarkup(const QString &text, bool insideFencedCode) {
     while (imageMatches.hasNext()) {
         const QRegularExpressionMatch match = imageMatches.next();
         const Span whole = span(match, 0);
-        if (insideCode(whole))
+        if (clashesWithCode(whole))
             continue;
         const Span content = span(match, 1);
         const int contentEnd = content.start + content.length;
@@ -1126,13 +1132,22 @@ MarkdownHighlighter::inlineMarkup(const QString &text, bool insideFencedCode) {
     while (linkMatches.hasNext()) {
         const QRegularExpressionMatch match = linkMatches.next();
         const Span whole = span(match, 0);
-        if (insideCode(whole))
+        if (clashesWithCode(whole))
             continue;
         const Span content = span(match, 1);
         const int contentEnd = content.start + content.length;
         markup.append({InlineKind::Link, content,
                        {{whole.start, 1},
                         {contentEnd, whole.start + whole.length - contentEnd}}});
+    }
+
+    // Last, because the formats are applied in this order and each one is
+    // written over what is already there. A code span sits inside whatever
+    // wraps it, so it has to be the one that wins: appended first, a heading or
+    // a bold run around it painted over its chip.
+    for (const Span &span : std::as_const(code)) {
+        markup.append({InlineKind::Code, {span.start + 1, span.length - 2},
+                       {{span.start, 1}, {span.start + span.length - 1, 1}}});
     }
 
     return markup;

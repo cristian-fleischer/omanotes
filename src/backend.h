@@ -35,6 +35,7 @@ class Backend : public QObject {
     Q_PROPERTY(QString themeAccent READ themeAccent NOTIFY themeColorsChanged)
     Q_PROPERTY(QString themeSelection READ themeSelection NOTIFY themeColorsChanged)
     Q_PROPERTY(QString themeCodeBackground READ themeCodeBackground NOTIFY themeColorsChanged)
+    Q_PROPERTY(QString themeInlineCodeBackground READ themeInlineCodeBackground NOTIFY themeColorsChanged)
     Q_PROPERTY(QString themeMarker READ themeMarker NOTIFY themeColorsChanged)
     // Padding inside a rendered block, in pixels at text scale 1. The editor
     // insets the text of code blocks and tables by this much; QML bleeds the
@@ -72,6 +73,7 @@ public:
     QString themeAccent() const { return m_themeAccent; }
     QString themeSelection() const { return m_themeSelection; }
     QString themeCodeBackground() const;
+    QString themeInlineCodeBackground() const;
     QString themeMarker() const;
     int blockPadding() const { return m_blockPadding; }
     static int countWords(const QString &text);
@@ -142,6 +144,10 @@ public:
     Q_INVOKABLE QVariantList tableRegions() const;
     // Document position of each hidden `*` list marker.
     Q_INVOKABLE QList<int> asteriskBulletPositions() const;
+    // One rectangle per inline code span, in the editor's own coordinates, so
+    // QML can draw a rounded chip behind it. A span that wraps gets one
+    // rectangle per line it runs through.
+    Q_INVOKABLE QVariantList inlineCodeRegions() const;
     // Pad the table under the caret so its columns line up. An explicit
     // edit, undoable, and the only thing here that rewrites the buffer.
     Q_INVOKABLE bool alignTableAt(int position);

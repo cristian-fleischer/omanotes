@@ -70,6 +70,8 @@ ApplicationWindow {
     // One entry per run of fenced-code lines: {y, height} in the editor's
     // coordinates. Recomputed after layout, never during it.
     property var codeSlabs: []
+    // One rectangle per inline code span, per line it runs through.
+    property var inlineCodeChips: []
     property var thematicRules: []
     property var tableSlabs: []
     property var bullets: []
@@ -251,6 +253,8 @@ ApplicationWindow {
             });
         }
         win.tableSlabs = tables;
+
+        win.inlineCodeChips = backend.inlineCodeRegions();
 
         var dots = [];
         var marks = backend.asteriskBulletPositions();
@@ -1024,6 +1028,25 @@ ApplicationWindow {
                             height: modelData.height + 2 * win.blockPadding
                             radius: win.scaledSize(5)
                             color: backend.themeCodeBackground
+                        }
+                    }
+
+                    // Inline code, the one thing here that is not the width of
+                    // the column. Drawn rather than set as a character
+                    // background so it can have corners: Qt Quick's text node
+                    // paints a background as one square per glyph run. Last in
+                    // the layer, so a chip in a table cell sits over the slab
+                    // and the column rules rather than under them.
+                    Repeater {
+                        model: win.inlineCodeChips
+                        Rectangle {
+                            readonly property real pad: Math.max(2, Math.round(win.editorFontPixelSize * 0.22))
+                            x: modelData.x - pad
+                            y: modelData.y - Math.round(pad / 2)
+                            width: modelData.width + 2 * pad
+                            height: modelData.height + pad
+                            radius: win.scaledSize(4)
+                            color: backend.themeInlineCodeBackground
                         }
                     }
                 }
