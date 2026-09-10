@@ -485,6 +485,59 @@ private slots:
         QVERIFY(body.value(QStringLiteral("height")).toReal() < firstBlock.height());
     }
 
+    // Handed a file, the window is a reader: the document gets the space and
+    // the vault waits to be asked for. What it must not do is decide anything
+    // for the next launch, or reading one file would put the sidebar away for
+    // good.
+    void readsAFileWithTheSidebarAway() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+        QTemporaryDir vaultDirectory;
+        QVERIFY(vaultDirectory.isValid());
+        QVERIFY(writeNote(vaultDirectory.path(), QStringLiteral("Note.md")));
+        const QString note = QDir(vaultDirectory.path()).filePath(QStringLiteral("Note.md"));
+
+        const QString setting = QStringLiteral("vault/sidebarVisible");
+        QSettings().setValue(setting, true);
+
+        // Opens a window the way main() does, reports whether the sidebar came
+        // up, toggles it as asked, and closes: -1 if the window would not load.
+        const auto readerRun = [&](const QString &startupFile, int toggles) {
+            Backend backend;
+            if (!startupFile.isEmpty())
+                backend.setStartupFile(startupFile);
+            VaultModel vault;
+            vault.setRoot(vaultDirectory.path());
+            QQmlEngine engine;
+            engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+            engine.rootContext()->setContextProperty(QStringLiteral("vault"), &vault);
+            QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+            QScopedPointer<QObject> window(component.create());
+            if (!window)
+                return -1;
+            if (!startupFile.isEmpty())
+                backend.open(QUrl::fromLocalFile(startupFile));
+            const int shown = window->property("sidebarVisible").toBool() ? 1 : 0;
+            for (int i = 0; i < toggles; ++i)
+                QMetaObject::invokeMethod(window.data(), "toggleSidebar");
+            return shown;
+        };
+
+        // Without a file it is the vault's window, and the setting decides.
+        QCOMPARE(readerRun(QString(), 0), 1);
+        QCOMPARE(QSettings().value(setting).toBool(), true);
+
+        // With one, the sidebar starts away and the setting is left alone.
+        QCOMPARE(readerRun(note, 0), 0);
+        QCOMPARE(QSettings().value(setting).toBool(), true);
+
+        // Asking for it and putting it back is a decision, and it is kept.
+        QCOMPARE(readerRun(note, 2), 0);
+        QCOMPARE(QSettings().value(setting).toBool(), false);
+
+        QSettings().remove(setting);
+    }
+
     void rowMenusHaveNoEmptyRows() {
         const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
         QVERIFY(!mainQmlPath.isEmpty());

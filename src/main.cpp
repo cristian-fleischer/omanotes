@@ -71,6 +71,15 @@ int main(int argc, char *argv[]) {
         backend.setTextScale(textScale);
     });
 
+    // A file named on the command line wins over whatever the last session
+    // left behind: open() stashes the restored draft under the note it belongs
+    // to, so nothing is lost by moving off it. The interface is told before it
+    // is built, because a window opened on one document lays itself out
+    // differently from one opened on a vault.
+    const QStringList args = app.arguments();
+    if (args.size() > 1)
+        backend.setStartupFile(args.at(1));
+
     QQmlApplicationEngine engine;
     QObject::connect(&engine, &QQmlApplicationEngine::warnings, &app,
                      [](const QList<QQmlError> &warnings) {
@@ -89,12 +98,8 @@ int main(int argc, char *argv[]) {
 
     backend.setParentWindow(qobject_cast<QWindow *>(engine.rootObjects().constFirst()));
 
-    // A file named on the command line wins over whatever the last session
-    // left behind: open() stashes the restored draft under the note it belongs
-    // to, so nothing is lost by moving off it.
-    const QStringList args = app.arguments();
-    if (args.size() > 1)
-        backend.open(QUrl::fromLocalFile(args.at(1)));
+    if (backend.startedWithFile())
+        backend.open(QUrl::fromLocalFile(backend.startupFile()));
 
     return app.exec();
 }

@@ -190,12 +190,21 @@ Notes with unsaved changes are marked with a dot. `Ctrl+Shift+R` throws those
 changes away and reads the note back off the disk, after asking; the same is on
 the right-click menu of any note carrying a dot, open or not.
 
+## Reading a single file
+
+`omanotes some-note.md` opens that file with the sidebar out of the way, so the
+document gets the window. It is the same app either way, and `Ctrl+L` brings the
+vault out whenever you want it. Reading a file does not decide anything for the
+next launch: unless you touch the sidebar, the vault window opens the way you
+left it. The desktop entry claims `text/markdown`, so this is also what a
+double-click gets once `xdg-mime default omanotes.desktop text/markdown` is set.
+
 ## Shortcuts
 
 - `Ctrl+S` saves. Unsaved documents use the XDG desktop portal file picker.
 - `Ctrl+Shift+S` saves as.
 - `Ctrl+O` opens a Markdown file through the portal picker.
-- `Ctrl+L` shows and hides the sidebar, as does the leftmost footer icon. It starts hidden. `Ctrl+Shift+L` focuses its filter field.
+- `Ctrl+L` shows and hides the sidebar, as does the leftmost footer icon. `Ctrl+Shift+L` focuses its filter field.
 - `Ctrl+Alt+N` creates a new note where you are pointing: the folder of the row picked in the sidebar, else the folder the open note lives in, else the vault root.
 - `Del` deletes the note picked in the sidebar, after asking. With no row picked it stays an ordinary editing key.
 - `Ctrl+=` and `Ctrl+-` scale the text, `Ctrl+0` puts it back, `Ctrl+wheel` does the same with the mouse.

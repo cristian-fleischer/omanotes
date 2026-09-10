@@ -52,6 +52,12 @@ ApplicationWindow {
     property int searchMatchIndex: -1
     property bool replaceOpen: false
     property bool sidebarVisible: true
+    // What the next launch gets, which is not always what this one shows. A
+    // window handed a file opens as a reader with the sidebar out of the way,
+    // and that is not a decision about the vault: only touching the sidebar is.
+    property bool sidebarPreference: false
+    property bool restoringState: true
+    onSidebarVisibleChanged: if (!win.restoringState) win.sidebarPreference = win.sidebarVisible
     property int sidebarWidth: 260
     // Ctrl+= and Ctrl+- scale the writing surface only. The chrome keeps
     // following the desktop's text size, which is a different knob.
@@ -1620,12 +1626,16 @@ ApplicationWindow {
         var sidebarState = backend.sidebarState();
         win.sidebarWidth = sidebarState.width;
         sidebar.panelWidth = sidebarState.width;
-        win.sidebarVisible = sidebarState.visible;
+        win.sidebarPreference = sidebarState.visible;
+        // Opening a file is asking to read it, so the document gets the window
+        // and the vault waits to be asked for. `Ctrl+L` brings it out.
+        win.sidebarVisible = backend.startedWithFile ? false : sidebarState.visible;
+        win.restoringState = false;
     }
 
     Component.onDestruction: {
         saveWindowState();
-        backend.saveSidebarState(win.sidebarVisible, win.sidebarWidth);
+        backend.saveSidebarState(win.sidebarPreference, win.sidebarWidth);
     }
 
 }

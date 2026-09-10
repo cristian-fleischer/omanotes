@@ -36,6 +36,9 @@ class Backend : public QObject {
     Q_PROPERTY(QString themeSelection READ themeSelection NOTIFY themeColorsChanged)
     Q_PROPERTY(QString themeCodeBackground READ themeCodeBackground NOTIFY themeColorsChanged)
     Q_PROPERTY(QString themeInlineCodeBackground READ themeInlineCodeBackground NOTIFY themeColorsChanged)
+    // Whether this run was handed a file to read. Fixed for the life of the
+    // process: a note opened later is a note, not the reason the window exists.
+    Q_PROPERTY(bool startedWithFile READ startedWithFile CONSTANT)
     Q_PROPERTY(QString themeMarker READ themeMarker NOTIFY themeColorsChanged)
     // Padding inside a rendered block, in pixels at text scale 1. The editor
     // insets the text of code blocks and tables by this much; QML bleeds the
@@ -55,6 +58,13 @@ public:
     ~Backend() override;
 
     void setParentWindow(QWindow *window);
+    // The file named on the command line, before the interface is loaded, so
+    // the window can lay itself out for reading a document rather than for
+    // working through a vault. main() opens it once there is a document to
+    // open it into.
+    void setStartupFile(const QString &path) { m_startupFile = path; }
+    QString startupFile() const { return m_startupFile; }
+    bool startedWithFile() const { return !m_startupFile.isEmpty(); }
 
     QUrl fileUrl() const { return m_fileUrl; }
     QString fileName() const;
@@ -239,6 +249,7 @@ private:
     void watchOmarchyTheme();
 
     QUrl m_fileUrl;
+    QString m_startupFile;
     bool m_modified = false;
     QString m_status;
     QString m_currentTitle;
