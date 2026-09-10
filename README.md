@@ -41,8 +41,8 @@ per-note drafts and the typography knobs described below.
 From the release:
 
 ```sh
-curl -LO https://github.com/cristian-fleischer/omanotes/releases/download/v0.2.0/omanotes-0.2.0-1-x86_64.pkg.tar.zst
-sudo pacman -U omanotes-0.2.0-1-x86_64.pkg.tar.zst
+curl -LO https://github.com/cristian-fleischer/omanotes/releases/download/v0.2.1/omanotes-0.2.1-1-x86_64.pkg.tar.zst
+sudo pacman -U omanotes-0.2.1-1-x86_64.pkg.tar.zst
 ```
 
 From source:
