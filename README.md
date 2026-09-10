@@ -35,7 +35,9 @@ per-note drafts and the typography knobs described below.
 
 ## Install
 
-From the release, on Arch and derivatives:
+### Arch and derivatives
+
+From the release:
 
 ```sh
 curl -LO https://github.com/cristian-fleischer/omanotes/releases/download/v0.1.0/omanotes-0.1.0-1-x86_64.pkg.tar.zst
@@ -51,15 +53,46 @@ cd omanotes
 bin/install          # bin/build, then makepkg -fsi
 ```
 
+### Debian and Ubuntu
+
+No package yet, so build it and install the three files by hand:
+
+```sh
+sudo apt install build-essential git \
+    qt6-base-dev qt6-declarative-dev qt6-quickcontrols2-dev \
+    qml6-module-qtquick-controls qml6-module-qtquick-controls-material \
+    qml6-module-qtquick-dialogs qml6-module-qtquick-layouts \
+    xdg-desktop-portal-gtk ripgrep
+
+git clone https://github.com/cristian-fleischer/omanotes.git
+cd omanotes
+bin/build
+
+sudo install -Dm755 build/omanotes /usr/local/bin/omanotes
+sudo install -Dm644 pkgbuild/omanotes.desktop /usr/local/share/applications/omanotes.desktop
+sudo install -Dm644 pkgbuild/omanotes.svg /usr/local/share/icons/hicolor/scalable/apps/omanotes.svg
+sudo update-desktop-database /usr/local/share/applications
+```
+
+`qml6-module-qtquick-controls-material` is the one people forget. Debian ships
+the Material style separately from Quick Controls, and the app asks for it by
+name. `ripgrep` is optional and only speeds up the sidebar's content search.
+
+Package names verified against Debian trixie and Ubuntu 24.04. The build itself
+has not been run on either, so treat this as the shape of it rather than a
+tested recipe, and say so if it does not work.
+
+### Anywhere else
+
+`bin/build` needs `qmake6`, `make` and a C++17 compiler, so it works anywhere
+Qt 6 does. It is developed against Qt 6.11; nothing in it is known to need a
+version that new, but no older Qt has been tested against.
+
 `bin/build` alone leaves the binary in `build/omanotes` without packaging, and
 `bin/test` runs the suite offscreen.
 
 It installs as `omanotes` and shares nothing with `omawrite`: separate binary,
 desktop file, icon and settings path, so both can be installed side by side.
-
-There is no package for other distributions. `bin/build` needs only `qmake6`,
-`make` and a C++17 compiler, so it works anywhere Qt 6 does; it is developed
-against Qt 6.11.
 
 ## What it renders
 
