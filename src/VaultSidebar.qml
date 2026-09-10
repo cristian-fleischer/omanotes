@@ -502,10 +502,10 @@ Rectangle {
                         font.pixelSize: sidebar.scaledSize(14)
                     }
 
-                    // Drawn rather than typed: a monospace writing font has no
-                    // geometric shapes, and a fallback font puts a dot where
-                    // the icon should be. Same 16-unit grid and stroke as the
-                    // footer icons, so the two sets match.
+                    // Drawn rather than typed: the chrome font is whatever the
+                    // desktop uses, and there is no glyph for a folder that
+                    // every one of them has. Same 16-unit grid and stroke as
+                    // the footer icons, so the two sets match.
                     // The canvas is drawn at the physical pixel size and
                     // scaled back down, so it has to sit in an item of the
                     // logical size: anchoring the canvas itself would centre a

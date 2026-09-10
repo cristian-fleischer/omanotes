@@ -50,9 +50,12 @@ ApplicationWindow {
     // following the desktop's text size, which is a different knob.
     property real editorZoom: 1.0
     property bool fullWidth: false
-    // The writing surface's family. The chrome stays on the bundled font, so
-    // the footer and dialogs keep their proportions whatever you pick here.
-    readonly property string bundledFontFamily: "iA Writer Mono S"
+    // What main() settled on for the chrome, which every dialog and button
+    // inherits. Named here so a QML file that has to say it can.
+    readonly property string chromeFontFamily: Qt.application.font.family
+    // The writing surface's family. view/fontFamily first, then whatever the
+    // desktop is set to use for monospace, then the font in the binary.
+    readonly property string bundledFontFamily: backend.defaultEditorFontFamily()
     property string editorFontFamily: bundledFontFamily
     // How wide the text column is, in characters. view/contentColumns.
     property int contentColumns: 65
@@ -1366,7 +1369,7 @@ ApplicationWindow {
                 Label {
                     text: backend.status
                     color: win.mutedColor
-                    font.family: "iA Writer Mono S"
+                    font.family: win.chromeFontFamily
                     font.pixelSize: win.scaledSize(11)
                     visible: text !== ""
                     elide: Text.ElideRight
@@ -1389,7 +1392,7 @@ ApplicationWindow {
                     text: backend.wordCount + (backend.wordCount === 1 ? " Word" : " Words")
                     color: win.mutedColor
                     opacity: 0.75
-                    font.family: "iA Writer Mono S"
+                    font.family: win.chromeFontFamily
                     font.pixelSize: win.scaledSize(11)
                 }
 

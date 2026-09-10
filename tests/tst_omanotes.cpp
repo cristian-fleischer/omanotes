@@ -9,6 +9,7 @@
 #include <QFontDatabase>
 #include <QSignalSpy>
 #include <QQuickItem>
+#include <QRawFont>
 #include <QQuickTextDocument>
 #include <QWindow>
 #include <QQmlComponent>
@@ -19,6 +20,7 @@
 #include "backend.h"
 #include "lexillacodehighlighter.h"
 #include "markdownhighlighter.h"
+#include "systemfonts.h"
 #include "vaultmodel.h"
 
 class OmanotesTest : public QObject {
@@ -30,6 +32,17 @@ private slots:
         // Keeps recovery snapshots out of the real ~/.local/share/omanotes.
         QStandardPaths::setTestModeEnabled(true);
         QQuickStyle::setStyle(QStringLiteral("Material"));
+
+        // main() loads these out of the binary's resources. The tests build no
+        // resources, so load the files the resources are made from: without
+        // them the bundled family is not a family at all here.
+        for (const QString &face : {QStringLiteral("Regular"), QStringLiteral("Italic"),
+                                    QStringLiteral("Bold"), QStringLiteral("BoldItalic")}) {
+            const QString path =
+                QFINDTESTDATA(QStringLiteral("../fonts/JetBrainsMonoNL-%1.ttf").arg(face));
+            QVERIFY2(!path.isEmpty(), qPrintable(face));
+            QVERIFY2(QFontDatabase::addApplicationFont(path) >= 0, qPrintable(path));
+        }
         QSettings::setDefaultFormat(QSettings::IniFormat);
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
                            m_settingsDirectory.path());
@@ -852,10 +865,11 @@ private slots:
         QCOMPARE(view.value(QStringLiteral("contentColumns")).toInt(), 65);
         QCOMPARE(window->property("contentColumns").toInt(), 65);
 
-        // The bundled family is stored as empty, so replacing the bundled font
-        // in a later release changes the default for anyone who never picked.
+        // Nothing picked is stored as empty, so the default can change under
+        // anyone who never chose: it is the desktop's monospace, or the font
+        // in the binary when the desktop has none worth using.
         QCOMPARE(window->property("editorFontFamily").toString(),
-                 QStringLiteral("iA Writer Mono S"));
+                 Backend::defaultEditorFontFamily());
         QCOMPARE(view.value(QStringLiteral("fontFamily")).toString(), QString());
         QVERIFY(window->findChild<QObject *>(QStringLiteral("fontDialog")));
 
@@ -874,11 +888,11 @@ private slots:
         QCOMPARE(Backend::resolveFontFamily(QStringLiteral("No Such Family")), QString());
         QCOMPARE(Backend::resolveFontFamily(QString()), QString());
 
-        // Anything that resolves to nothing falls back to the bundled font.
+        // Anything that resolves to nothing falls back to the default.
         QVERIFY(QMetaObject::invokeMethod(window.data(), "setEditorFont",
                                           Q_ARG(QVariant, QVariant(QStringLiteral("No Such Family")))));
         QCOMPARE(window->property("editorFontFamily").toString(),
-                 QStringLiteral("iA Writer Mono S"));
+                 Backend::defaultEditorFontFamily());
 
         // The font dialog's own path: whatever it hands back has to reach the
         // editor. accept() is a no-op on a closed dialog, so open it first;
@@ -2400,6 +2414,93 @@ private slots:
         QFile untouched(taken);
         QVERIFY(untouched.open(QIODevice::ReadOnly));
         QCOMPARE(untouched.readAll(), QByteArray("mine\n"));
+    }
+
+    // A desktop writes down which font it uses, and every desktop writes it
+    // differently. The family is the part we want; the size and the style are
+    // the app's own business.
+    void readsFontDescriptions() {
+        const auto family = [](const char *description) {
+            return SystemFonts::familyFromDescription(QString::fromUtf8(description));
+        };
+        // Qt and KDE: family first, then how to draw it.
+        QCOMPARE(family("Noto Sans,10,-1,5,50,0,0,0,0,0"), QStringLiteral("Noto Sans"));
+        QCOMPARE(family("JetBrains Mono NL,11,-1,5,50,0,0,0,0,0"),
+                 QStringLiteral("JetBrains Mono NL"));
+        // GNOME: quoted, with the size and any style words on the end.
+        QCOMPARE(family("'Noto Sans  10'"), QStringLiteral("Noto Sans"));
+        QCOMPARE(family("'Liga EnvyCodeR Nerd Font  11'"),
+                 QStringLiteral("Liga EnvyCodeR Nerd Font"));
+        QCOMPARE(family("'Noto Sans Bold 10'"), QStringLiteral("Noto Sans"));
+        QCOMPARE(family("Cantarell Semi-Bold 11"), QStringLiteral("Cantarell Semi-Bold"));
+        QCOMPARE(family("Source Code Pro Italic 9"), QStringLiteral("Source Code Pro"));
+        // A family whose own name ends in a number keeps it.
+        QCOMPARE(family("'Fira Code'"), QStringLiteral("Fira Code"));
+        QCOMPARE(family(""), QString());
+    }
+
+    void readsKdeglobals() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("kdeglobals"));
+        QFile seed(path);
+        QVERIFY(seed.open(QIODevice::WriteOnly));
+        seed.write("[General]\n"
+                   "font=Noto Sans,10,-1,5,50,0,0,0,0,0\n"
+                   "fixed=Hack,10,-1,5,50,0,0,0,0,0\n");
+        seed.close();
+
+        QCOMPARE(SystemFonts::familyFromKdeglobals(path, QStringLiteral("font")),
+                 QStringLiteral("Noto Sans"));
+        QCOMPARE(SystemFonts::familyFromKdeglobals(path, QStringLiteral("fixed")),
+                 QStringLiteral("Hack"));
+        // A key that is not there, and a file that is not there.
+        QCOMPARE(SystemFonts::familyFromKdeglobals(path, QStringLiteral("smallestReadable")),
+                 QString());
+        QCOMPARE(SystemFonts::familyFromKdeglobals(directory.filePath(QStringLiteral("none")),
+                                                   QStringLiteral("font")),
+                 QString());
+    }
+
+    // Whatever the desktop says, the chain has to end somewhere usable. The
+    // font in the binary is the end of it, and it has to be able to do the job
+    // the one it replaced could not.
+    void theBundledFontCanDoTheJob() {
+        const QString bundled = SystemFonts::bundledFamily();
+        QCOMPARE(bundled, QStringLiteral("JetBrains Mono NL"));
+        QVERIFY(QFontDatabase::families().contains(bundled));
+        QVERIFY(MarkdownHighlighter::isMonospacedFamily(bundled));
+        // The reason for the change: iA Writer Mono S had no box glyphs at all,
+        // so a diagram in a fence always depended on a system font.
+        QVERIFY(MarkdownHighlighter::drawsContinuousBoxes(bundled));
+
+        // All four faces are there, so nothing is a synthesised slant.
+        for (const QString &style : {QStringLiteral("Regular"), QStringLiteral("Italic"),
+                                     QStringLiteral("Bold"), QStringLiteral("Bold Italic")}) {
+            QVERIFY2(QFontDatabase::styles(bundled).contains(style),
+                     qPrintable(QStringLiteral("missing %1").arg(style)));
+        }
+
+        // What a note is written with, beyond the Latin the old font covered.
+        const QRawFont raw = QRawFont::fromFont(QFont(bundled));
+        for (char32_t character : {U'A', U'\u00e4', U'\u0142', U'\u0410', U'\u03b1',
+                                   U'\u2192', U'\u2500', U'\u2588', U'\u2022', U'\u20ac'})
+            QVERIFY(raw.supportsCharacter(character));
+    }
+
+    // Whatever the machine is configured with, what comes out is a family that
+    // is installed and that a table can be laid out in.
+    void theResolvedFontsAreUsable() {
+        const QString fixed = SystemFonts::fixedFamily();
+        if (!fixed.isEmpty())
+            QVERIFY(QFontDatabase::families().contains(fixed, Qt::CaseInsensitive));
+        const QString interface_ = SystemFonts::interfaceFamily();
+        if (!interface_.isEmpty())
+            QVERIFY(QFontDatabase::families().contains(interface_, Qt::CaseInsensitive));
+
+        const QString editor = Backend::defaultEditorFontFamily();
+        QVERIFY(!editor.isEmpty());
+        QVERIFY(MarkdownHighlighter::isMonospacedFamily(editor));
     }
 
     void findsInlineMarkdownRanges() {

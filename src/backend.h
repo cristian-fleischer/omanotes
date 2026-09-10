@@ -125,9 +125,13 @@ public:
     // Document position of a task item's mark, or -1.
     Q_INVOKABLE int taskMarkerAt(int position) const;
     // The portal font chooser can hand back a styled name such as
-    // "iA Writer Mono S Bold". Resolve it to a family the font database
+    // "JetBrains Mono NL Bold". Resolve it to a family the font database
     // knows, or to nothing, which means the bundled font.
     Q_INVOKABLE static QString resolveFontFamily(const QString &family);
+    // The writing surface's family when view/fontFamily is not set: the
+    // desktop's own monospace, then the font in the binary. Monospace either
+    // way, because a table only lines up if every glyph is the same width.
+    Q_INVOKABLE static QString defaultEditorFontFamily();
     // First and last document position of every run of fenced-code lines, so
     // QML can draw one slab behind each of them.
     Q_INVOKABLE QVariantList fencedCodeRegions() const;

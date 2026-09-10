@@ -99,6 +99,8 @@ public:
     // its own line spacing draws every diagram in dashes, however monospaced it
     // is. Noto Sans Mono is such a font.
     static bool drawsContinuousBoxes(const QString &family);
+    // QFontInfo::fixedPitch() cannot be trusted, so this compares advances.
+    static bool isMonospacedFamily(const QString &family);
 
     // Pin the family used for fenced code and inline code. Empty picks the best
     // available automatically.

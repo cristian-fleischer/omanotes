@@ -1,4 +1,5 @@
 #include "backend.h"
+#include "systemfonts.h"
 #include "vaultmodel.h"
 
 #include <QClipboard>
@@ -641,8 +642,8 @@ QString Backend::resolveFontFamily(const QString &family) {
 
     const QStringList known = QFontDatabase::families();
     QStringList words = wanted.split(QLatin1Char(' '), Qt::SkipEmptyParts);
-    // Longest prefix wins, so "iA Writer Mono S Bold" resolves to the family and
-    // not to "iA Writer", which is also a real one.
+    // Longest prefix wins, so "JetBrains Mono NL Bold" resolves to the family
+    // and not to "JetBrains Mono", which may also be installed.
     while (!words.isEmpty()) {
         const QString candidate = words.join(QLatin1Char(' '));
         for (const QString &name : known) {
@@ -1002,7 +1003,8 @@ QVariantMap Backend::viewState() const {
              settings.value(QStringLiteral("view/zoom"), 1.0).toDouble()},
             {QStringLiteral("fullWidth"),
              settings.value(QStringLiteral("view/fullWidth"), false).toBool()},
-            // Empty means the bundled iA Writer Mono S.
+            // Empty means "work it out": the desktop's monospace, then the
+            // font in the binary.
             {QStringLiteral("fontFamily"),
              settings.value(QStringLiteral("view/fontFamily")).toString()},
             // How wide the text column is, in characters, when it is not set to
@@ -1013,6 +1015,13 @@ QVariantMap Backend::viewState() const {
             // interface, so it only round-trips through here to stay in the file.
             {QStringLiteral("interfaceFontFamily"),
              settings.value(QStringLiteral("view/interfaceFontFamily")).toString()}};
+}
+
+QString Backend::defaultEditorFontFamily() {
+    const QString configured = SystemFonts::fixedFamily();
+    if (MarkdownHighlighter::isMonospacedFamily(configured))
+        return configured;
+    return SystemFonts::bundledFamily();
 }
 
 QString Backend::interfaceFontFamily() {

@@ -9,13 +9,15 @@ SOURCES += \
     ../src/backend.cpp \
     ../src/markdownhighlighter.cpp \
     ../src/vaultmodel.cpp \
-    ../src/lexillacodehighlighter.cpp
+    ../src/lexillacodehighlighter.cpp \
+    ../src/systemfonts.cpp
 HEADERS += \
     ../src/backend.h \
     ../src/markdownhighlighter.h \
     ../src/vaultmodel.h \
     ../src/codesyntaxhighlighter.h \
-    ../src/lexillacodehighlighter.h
+    ../src/lexillacodehighlighter.h \
+    ../src/systemfonts.h
 
 include(../lexilla.pri)
 

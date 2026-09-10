@@ -1,4 +1,5 @@
 #include "markdownhighlighter.h"
+#include "systemfonts.h"
 
 #include "lexillacodehighlighter.h"
 
@@ -81,8 +82,9 @@ bool isParagraphLine(const QString &line) {
     return !listRe().match(line).hasMatch();
 }
 
-// QFontInfo::fixedPitch() reports false for iA Writer Mono S even though every
-// advance is the same, so ask the metrics rather than the font's own claim.
+// QFontInfo::fixedPitch() reports false for some fonts whose every advance is
+// the same, iA Writer Mono S among them, so ask the metrics rather than the
+// font's own claim.
 bool isMonospaced(const QFont &font) {
     const QFontMetricsF metrics(font);
     return qFuzzyCompare(metrics.horizontalAdvance(QLatin1Char('i')),
@@ -100,9 +102,10 @@ QString resolvedFamily(const QFont &font) {
 // Box-drawing characters join into continuous rules only when two things hold:
 // they come from the same font as the code around them, and that font draws
 // them at least as tall as the line they sit on. Having the glyphs is not
-// enough. Noto Sans Mono, the system fixed font on this machine, draws U+2502
-// at 0.92 of its own line spacing, which is a dashed line however the leading
-// is set.
+// enough: Noto Sans Mono draws U+2502 at 0.918 of its own line spacing, which
+// is a dashed line however the leading is set. Measured across the monospaces
+// on one machine, it is the only common family that fails; the bundled
+// JetBrains Mono NL is at 1.184.
 bool boxDrawingTiles(const QFont &font) {
     const QRawFont raw = QRawFont::fromFont(font);
     if (!raw.isValid())
@@ -181,6 +184,10 @@ bool MarkdownHighlighter::isTableSeparator(const QString &text) {
 
 bool MarkdownHighlighter::isFenceLine(const QString &text) {
     return ::isFenceLine(text);
+}
+
+bool MarkdownHighlighter::isMonospacedFamily(const QString &family) {
+    return isInstalled(family) && isMonospaced(probeFont(family));
 }
 
 bool MarkdownHighlighter::drawsContinuousBoxes(const QString &family) {
@@ -350,13 +357,17 @@ void MarkdownHighlighter::rebuildFormats() {
     // Tables and code only line up if every glyph on the line has the same
     // advance. Prefer the document's own font when it is monospaced, so a table
     // keeps the look of the rest of the page.
-    const QFont systemFixedFont = QFontDatabase::systemFont(QFontDatabase::FixedFont);
-    const QString systemFixed = resolvedFamily(systemFixedFont);
+    // What the desktop is set to use, which is where a font nobody configured
+    // for this app should come from.
+    const QString systemFixed = SystemFonts::fixedFamily();
+    const QFont systemFixedFont = systemFixed.isEmpty() ? QFont() : probeFont(systemFixed);
 
     m_tableFamilies.clear();
     if (isMonospaced(m_formatFont))
         m_tableFamilies.append(m_formatFont.family());
-    m_tableFamilies.append(systemFixed);
+    if (!systemFixed.isEmpty())
+        m_tableFamilies.append(systemFixed);
+    m_tableFamilies.append(SystemFonts::bundledFamily());
 
     // Code has the stronger requirement: one font for the whole block, and that
     // font has to draw box characters that join, or every diagram in a fence
@@ -368,15 +379,17 @@ void MarkdownHighlighter::rebuildFormats() {
             && boxDrawingTiles(m_formatFont)) {
         m_codeFamilies.append(m_formatFont.family());
     }
-    if (m_codeFamilies.isEmpty() && boxDrawingTiles(systemFixedFont))
+    if (m_codeFamilies.isEmpty() && !systemFixed.isEmpty() && boxDrawingTiles(systemFixedFont))
         m_codeFamilies.append(systemFixed);
     if (m_codeFamilies.isEmpty()) {
         const QString tiling = firstTilingMonospaceFamily();
         if (!tiling.isEmpty())
             m_codeFamilies.append(tiling);
     }
+    // The font in the binary draws boxes that join, so the chain always has an
+    // answer and a diagram in a fence is never dashed.
     if (m_codeFamilies.isEmpty())
-        m_codeFamilies = m_tableFamilies;
+        m_codeFamilies.append(SystemFonts::bundledFamily());
 
     m_markerFormat = QTextCharFormat();
     m_markerFormat.setForeground(marker);

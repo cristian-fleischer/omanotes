@@ -7,6 +7,7 @@ TEMPLATE = app
 HEADERS += \
     src/backend.h \
     src/markdownhighlighter.h \
+    src/systemfonts.h \
     src/systemtheme.h \
     src/vaultmodel.h \
     src/codesyntaxhighlighter.h \
@@ -16,6 +17,7 @@ SOURCES += \
     src/main.cpp \
     src/backend.cpp \
     src/markdownhighlighter.cpp \
+    src/systemfonts.cpp \
     src/systemtheme.cpp \
     src/vaultmodel.cpp \
     src/lexillacodehighlighter.cpp

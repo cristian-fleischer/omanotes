@@ -11,6 +11,7 @@
 #include <QFile>
 
 #include "backend.h"
+#include "systemfonts.h"
 #include "systemtheme.h"
 #include "vaultmodel.h"
 
@@ -20,10 +21,10 @@ int main(int argc, char *argv[]) {
     app.setDesktopFileName(QStringLiteral("omanotes"));
     app.setWindowIcon(QIcon::fromTheme(QStringLiteral("omanotes")));
 
-    QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/iAWriterMonoS-Regular.ttf"));
-    QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/iAWriterMonoS-Italic.ttf"));
-    QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/iAWriterMonoS-Bold.ttf"));
-    QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/iAWriterMonoS-BoldItalic.ttf"));
+    QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/JetBrainsMonoNL-Regular.ttf"));
+    QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/JetBrainsMonoNL-Italic.ttf"));
+    QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/JetBrainsMonoNL-Bold.ttf"));
+    QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/JetBrainsMonoNL-BoldItalic.ttf"));
     // QSettings resolves to ~/.config/omanotes/omanotes.conf. Leaving the
     // organisation domain unset keeps the path off omacom.io, so Omanotes
     // and OmaWrite never share a settings file.
@@ -43,12 +44,16 @@ int main(int argc, char *argv[]) {
 
     // Carry the desktop's text scale into the default font, so the chrome that
     // inherits it (dialog titles, buttons) grows along with the writing area.
-    // view/interfaceFontFamily replaces the bundled font in the chrome. It is
-    // a config knob only: nothing in the interface writes it.
-    const QString interfaceFamily = Backend::interfaceFontFamily();
-    const QFont interfaceFont(interfaceFamily.isEmpty()
-                                  ? QStringLiteral("iA Writer Mono S")
-                                  : interfaceFamily);
+    // view/interfaceFontFamily first, then whatever the desktop is set to use
+    // for its own interface, then the font in the binary. The chrome follows
+    // the desktop rather than the writing surface, so this one is proportional
+    // where it can be.
+    QString interfaceFamily = Backend::interfaceFontFamily();
+    if (interfaceFamily.isEmpty())
+        interfaceFamily = SystemFonts::interfaceFamily();
+    if (interfaceFamily.isEmpty())
+        interfaceFamily = SystemFonts::bundledFamily();
+    const QFont interfaceFont(interfaceFamily);
     const qreal basePointSize = interfaceFont.pointSizeF() > 0
         ? interfaceFont.pointSizeF()
         : app.font().pointSizeF();

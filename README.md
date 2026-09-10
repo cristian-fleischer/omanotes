@@ -4,9 +4,9 @@ A Markdown notes app for Linux: an editor that styles Markdown inline as you
 type, and a sidebar listing a folder of `.md` files. No GTK, no Chromium, no
 browser engine.
 
-Lean and quick on purpose. One 871 KB binary, nothing at runtime outside Qt 6,
-and a note on screen in well under half a second: 0.26 s for a short note and
-0.40 s for a 62 KB one, wall clock from exec to the window. The numbers are
+Lean and quick on purpose. One 943 KB binary, nothing at runtime outside Qt 6,
+and a note on screen in well under half a second: 0.20 s for a short note and
+0.35 s for a 62 KB one, wall clock from exec to the window. The numbers are
 measured, and there is a [table of them](#footprint) further down.
 
 The buffer always holds your exact Markdown. Styling is applied over the source,
@@ -198,19 +198,37 @@ stays flush with the column.
 
 ## Fonts
 
-The bundled font is iA Writer Mono S, under the SIL Open Font License 1.1. It is
-compiled into the binary, so it is there whether or not it is installed on the
-system.
+Three surfaces need a font, and each is chosen the same way: what you set for
+Omanotes, then what your desktop is set to, then the font in the binary.
 
-`Ctrl+Shift+F` picks a different family for the writing surface; the footer and
-the dialogs stay on the bundled one unless `view/interfaceFontFamily` names
-another, which is a config knob only.
+| Surface | Config knob | Then | Then |
+| --- | --- | --- | --- |
+| Writing | `view/fontFamily`, `Ctrl+Shift+F` | the desktop's monospace | bundled |
+| Chrome: sidebar, footer, dialogs | `view/interfaceFontFamily` | the desktop's interface font | bundled |
+| Code and tables | `typography/codeFontFamily` | the writing font, then the desktop's monospace | bundled |
 
-Fenced code is rendered in a font of its own, because iA Writer Mono S has no
-box-drawing glyphs and a diagram in a fence needs them to join into continuous
-rules. The choice is the editor's font when it can draw them, otherwise the best
-installed monospace that can. `typography/codeFontFamily` pins one. Tables use
-the editor's font whenever it is monospaced, since a pipe never joins anyway.
+"What your desktop is set to" is asked of the desktop rather than guessed:
+`kdeglobals` first, which is where Plasma keeps it and where Qt's own KDE
+platform theme looks; then GNOME's `org.gnome.desktop.interface`; then
+whatever Qt's active platform theme says, which on a machine with no desktop
+settings at all is fontconfig's `monospace` and `sans-serif`. Each answer has to
+name a family that is actually installed, or the next one is tried.
+
+Code has one requirement the others do not: box-drawing characters must join
+into continuous rules. Having the glyphs is not enough — the ink has to be at
+least as tall as the line spacing, or a diagram in a fence comes out dashed.
+Noto Sans Mono is the one common monospace that fails this, at 0.918. So the
+code font walks a longer chain: the writing font if it tiles, the desktop's
+monospace if it tiles, then DejaVu Sans Mono, Liberation Mono, Adwaita Mono or
+Consolas, then any installed fixed-pitch family that tiles, then the bundled
+one, which does.
+
+The bundled font is JetBrains Mono NL 2.304, SIL Open Font License 1.1,
+compiled into the binary so it is there whether or not it is installed. NL is
+the variant without ligatures: a writing surface is the wrong place for `->` to
+turn into an arrow behind your back. The four faces are subset to the scripts a
+Markdown note uses, which is what keeps them at 258 KB rather than 405 KB; see
+`fonts/README.md` for the range and how to regenerate them.
 
 Text also follows the desktop text size — `omarchy display text size`, or GNOME's
 `text-scaling-factor` — and re-flows without a restart. The default of 12px leaves
@@ -225,26 +243,27 @@ wall-clock from exec to the window on screen, best of five.
 
 | | Omanotes | omawrite |
 | --- | --- | --- |
-| Binary | 871 KB | 572 KB |
-| Installed package | 877 KB | 565 KB |
-| Window on screen, short note | 0.26 s | 0.21 s |
-| Window on screen, 62 KB note | 0.40 s | 0.26 s |
-| PSS, short note idle | 86 MB | 71 MB |
-| PSS, 62 KB note idle | 118 MB | 99 MB |
-| CPU idle, per 12 s | 0.01 s | 0.00 s |
+| Binary | 943 KB | 572 KB |
+| Installed package | 949 KB | 565 KB |
+| Download | 0.59 MB | 0.31 MB |
+| Window on screen, short note | 0.20 s | 0.20 s |
+| Window on screen, 62 KB note | 0.35 s | 0.22 s |
+| PSS, short note idle | 78 MB | 71 MB |
+| PSS, 62 KB note idle | 115 MB | 101 MB |
 
-200 KB of the binary is the bundled font, compressed, and it comes from
-upstream. Of the code, measured before link-time optimisation folds it
-together: 379 KB is Lexilla's nine lexers, 333 KB this fork's own, and 170 KB
-upstream's editor. Compressing the resources, link-time optimisation with section garbage
-collection, and building Lexilla for size rather than speed are worth about
-450 KB between them. All three are set in `omanotes.pro` and `lexilla.pri`
-with the reasoning.
+258 KB of the binary is the bundled font, compressed and subset. Of the code,
+measured before link-time optimisation folds it together: 379 KB is Lexilla's
+nine lexers, 333 KB this fork's own, and 170 KB upstream's editor. Compressing
+the resources, link-time optimisation with section garbage collection, and
+building Lexilla for size rather than speed are worth about 450 KB between
+them. All three are set in `omanotes.pro` and `lexilla.pri` with the
+reasoning.
 
-Most of the memory is neither app: 38 MB of the 118 MB is the Mesa GL stack the
+Most of the memory is neither app: 38 MB of the 115 MB is the Mesa GL stack the
 scene graph pulls in, which `QT_QUICK_BACKEND=software` removes at the cost of
 frame rate. Qt's own libraries account for 16 MB of it, and the whole of
-Omanotes for about 19 MB more than upstream.
+Omanotes for about 14 MB more than upstream. Nothing polls: idle CPU is a few
+hundredths of a second per twelve.
 
 ## Requirements
 
@@ -257,6 +276,6 @@ Omanotes for about 19 MB more than upstream.
 Nothing else. Lexilla is vendored and linked statically, and the font is
 compiled into the binary.
 
-The iA Writer Mono font is bundled under the SIL Open Font License 1.1; see
-`fonts/OFL.txt`. The font is copyright Information Architects Inc. and based on
-IBM Plex, copyright IBM Corp.
+JetBrains Mono NL is bundled under the SIL Open Font License 1.1; see
+`fonts/OFL.txt` for the licence and `fonts/README.md` for what was subset out of
+it. The font is copyright 2020 The JetBrains Mono Project Authors.

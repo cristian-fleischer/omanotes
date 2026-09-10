@@ -23,7 +23,7 @@ Button {
         color: control.labelColor
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter
-        font.family: "iA Writer Mono S"
+        font.family: Qt.application.font.family
         font.pixelSize: Math.round(12 * control.textScale)
     }
 
