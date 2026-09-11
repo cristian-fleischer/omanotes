@@ -574,19 +574,21 @@ private slots:
             const QTextBlockFormat format = document->findBlockByNumber(number).blockFormat();
             return QPair<qreal, qreal>{format.topMargin(), format.bottomMargin()};
         };
-        const qreal padding = backend.blockPadding();
-        QVERIFY(padding > 0);
+        // Twice the padding: the bleed, and as much page again between the
+        // slab's edge and the text.
+        const qreal room = 2 * backend.blockPadding();
+        QVERIFY(room > 0);
 
         // Text on both sides: room above the opening fence, below the closing.
-        QCOMPARE(margins(1), (QPair<qreal, qreal>{padding, 0.0}));
+        QCOMPARE(margins(1), (QPair<qreal, qreal>{room, 0.0}));
         QCOMPARE(margins(2), (QPair<qreal, qreal>{0.0, 0.0}));
-        QCOMPARE(margins(3), (QPair<qreal, qreal>{0.0, padding}));
+        QCOMPARE(margins(3), (QPair<qreal, qreal>{0.0, room}));
         // Blank lines on both sides: the blank line is the room.
         QCOMPARE(margins(6), (QPair<qreal, qreal>{0.0, 0.0}));
         QCOMPARE(margins(8), (QPair<qreal, qreal>{0.0, 0.0}));
         // A table works the same way.
-        QCOMPARE(margins(11), (QPair<qreal, qreal>{padding, 0.0}));
-        QCOMPARE(margins(13), (QPair<qreal, qreal>{0.0, padding}));
+        QCOMPARE(margins(11), (QPair<qreal, qreal>{room, 0.0}));
+        QCOMPARE(margins(13), (QPair<qreal, qreal>{0.0, room}));
         // Prose never carries any.
         QCOMPARE(margins(0), (QPair<qreal, qreal>{0.0, 0.0}));
         QCOMPARE(margins(4), (QPair<qreal, qreal>{0.0, 0.0}));

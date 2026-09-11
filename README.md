@@ -261,9 +261,10 @@ Code and tables sit inside their slab rather than against its edges:
 `typography/blockPadding` insets their text as a block margin and bleeds the
 slab out by the same amount, so the space is equal on all four sides. Prose
 stays flush with the column. Where prose runs straight into a fence or a table
-with no blank line between, the run reserves that much room above or below
-itself, so the slab never lands on the text next to it; a blank line is room
-enough on its own and gets nothing extra.
+with no blank line between, the run reserves twice that above or below itself:
+half for the slab to bleed into, half as page between the slab's edge and the
+text, the same distance the text inside keeps from that edge. A blank line is
+room enough on its own and gets nothing extra; it comes to about the same gap.
 
 ## Fonts
 
