@@ -19,6 +19,10 @@ ApplicationWindow {
     readonly property color pageColor: backend.themeBackground
     readonly property color textColor: backend.themeForeground
     readonly property color strongTextColor: backend.themeForeground
+    // Body text on the page, a step towards the page from the theme's
+    // foreground: at full contrast a page of prose glared, and the headings
+    // and bold, which keep the foreground, had nothing to stand out from.
+    readonly property color proseColor: backend.themeProseForeground
     readonly property color mutedColor: darkMode ? "#909191" : "#aeb1b5"
     readonly property color selectionFill: backend.themeSelection
     // The desktop's text size knob (GNOME's text-scaling-factor, which
@@ -28,18 +32,13 @@ ApplicationWindow {
     readonly property int editorFontPixelSize:
         Math.max(8, Math.round(20 * win.textScale * win.editorZoom))
     // What the editor column actually gets, which is the window less the
-    // sidebar and the Flickable's own 24px margins. Measuring the window
-    // instead would push the text column off the left edge once a sidebar
-    // takes a third of the width.
+    // sidebar and 24px either side. The Flickable itself spans the whole area
+    // and the column is centred in it, so the scrollbar sits on the window's
+    // edge and a chip at the start of a line has room to draw its own edge.
+    // Measuring the window instead would push the text column off the left
+    // edge once a sidebar takes a third of the width.
     readonly property int editorAreaWidth:
         Math.max(1, width - (sidebarVisible ? sidebarWidth : 0) - 48)
-    // Room inside the Flickable either side of the text column, taken out of
-    // the Flickable's own margin rather than added to it, so the column lands
-    // where it did. An inline code chip is the one thing drawn wider than the
-    // text it belongs to, and at full width the column is the whole area: with
-    // nothing to spill into, a chip at the start of a line lost its left edge
-    // to the clip.
-    readonly property int editorGutter: Math.max(4, Math.round(editorFontPixelSize * 0.25))
     readonly property int editorWidth: fullWidth ? editorAreaWidth : Math.min(
         Math.max(120,
                  Math.min(Math.round(writerFontMetrics.averageCharacterWidth * win.contentColumns),
@@ -755,8 +754,6 @@ ApplicationWindow {
                 id: editorFlick
                 objectName: "editorFlick"
                 anchors.fill: parent
-                anchors.leftMargin: 24 - win.editorGutter
-                anchors.rightMargin: 24 - win.editorGutter
                 clip: true
                 contentWidth: width
                 contentHeight: Math.max(height, editor.y + editor.implicitHeight + 220)
@@ -775,18 +772,27 @@ ApplicationWindow {
                     bottomPadding: win.scaledSize(32)
                     bottomInset: win.scaledSize(32)
                     // Material's thumb is 13 px wide whenever the bar can be
-                    // dragged, which is always. A 6 px pill instead, in the
-                    // same colours; the style's own fade-in and fade-out still
-                    // apply, since they act on whatever the thumb is.
+                    // dragged, which is always, in a 16 px track. A 4 px pill
+                    // in a 10 px track instead, in the same colours; the
+                    // style's own fade-in and fade-out still apply, since they
+                    // act on whatever the thumb and track are. The track is
+                    // what takes the mouse, so the thumb can be this thin.
+                    padding: win.scaledSize(3)
                     contentItem: Rectangle {
-                        implicitWidth: win.scaledSize(6)
-                        implicitHeight: win.scaledSize(6)
+                        implicitWidth: win.scaledSize(4)
+                        implicitHeight: win.scaledSize(4)
                         radius: width / 2
                         color: editorScrollBar.pressed
                             ? editorScrollBar.Material.scrollBarPressedColor
                             : editorScrollBar.hovered
                                 ? editorScrollBar.Material.scrollBarHoveredColor
                                 : editorScrollBar.Material.scrollBarColor
+                        opacity: 0.0
+                    }
+                    background: Rectangle {
+                        implicitWidth: win.scaledSize(10)
+                        implicitHeight: win.scaledSize(10)
+                        color: "#0e000000"
                         opacity: 0.0
                     }
                 }
@@ -1119,7 +1125,7 @@ ApplicationWindow {
                     selectByMouse: true
                     persistentSelection: true
                     activeFocusOnPress: true
-                    color: win.textColor
+                    color: win.proseColor
                     selectedTextColor: win.strongTextColor
                     selectionColor: win.selectionFill
                     font.family: win.editorFontFamily

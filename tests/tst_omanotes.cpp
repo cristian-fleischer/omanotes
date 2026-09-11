@@ -1449,11 +1449,14 @@ private slots:
         QTextDocument document;
         document.setDefaultFont(bodyFont());
         MarkdownHighlighter highlighter(&document);
-        setDocumentText(document, QStringLiteral("## Heading\nbody"));
+        setDocumentText(document, QStringLiteral("## Heading\nbody\n#### Small"));
 
+        // The large levels carry their size and stay at the regular weight;
+        // the small ones are bold, or they would not read as headings.
         const QTextCharFormat content = formatAt(document, 0, 3);
         QCOMPARE(content.fontPointSize(), 12.0 * 1.6);
-        QCOMPARE(content.fontWeight(), int(QFont::Bold));
+        QCOMPARE(content.fontWeight(), int(QFont::Normal));
+        QCOMPARE(formatAt(document, 2, 5).fontWeight(), int(QFont::Bold));
 
         // The `##` and the space after it collapse to nothing, or the heading
         // would sit indented by its own syntax.

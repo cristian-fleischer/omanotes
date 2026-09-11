@@ -1862,6 +1862,11 @@ QVariantList Backend::inlineCodeRegions() const {
     return regions;
 }
 
+QString Backend::themeProseForeground() const {
+    return MarkdownHighlighter::proseForegroundFor(m_themeBackground, m_themeForeground, m_darkMode)
+        .name();
+}
+
 QString Backend::themeInlineCodeBackground() const {
     return MarkdownHighlighter::inlineCodeBackgroundFor(m_themeBackground, m_darkMode).name();
 }

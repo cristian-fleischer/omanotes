@@ -246,6 +246,22 @@ QColor MarkdownHighlighter::inlineCodeBackgroundFor(const QString &pageBackgroun
                             base.blueF() * (1 - weight) + over.blueF() * weight);
 }
 
+QColor MarkdownHighlighter::proseForegroundFor(const QString &pageBackground,
+                                               const QString &foreground, bool darkMode) {
+    QColor page(pageBackground);
+    if (!page.isValid())
+        page = darkMode ? QColor(QStringLiteral("#101010")) : QColor(QStringLiteral("#ffffff"));
+    QColor text(foreground);
+    if (!text.isValid())
+        text = darkMode ? QColor(QStringLiteral("#eeeeee")) : QColor(QStringLiteral("#222324"));
+    // A tenth of the way to the page: enough to read as a softer white next
+    // to a heading, not enough to read as grey.
+    const qreal weight = 0.10;
+    return QColor::fromRgbF(text.redF() * (1 - weight) + page.redF() * weight,
+                            text.greenF() * (1 - weight) + page.greenF() * weight,
+                            text.blueF() * (1 - weight) + page.blueF() * weight);
+}
+
 QColor MarkdownHighlighter::codeBackgroundFor(const QString &pageBackground, bool darkMode) {
     // Darker than the page, which reads as a panel let into it. On a page that
     // is already almost black there is nothing darker left to show, so
@@ -384,6 +400,9 @@ void MarkdownHighlighter::rebuildFormats() {
     const QColor link = !m_customAccent.isEmpty() ? QColor(m_customAccent)
         : (m_darkMode ? QColor(QStringLiteral("#5584aa")) : QColor(QStringLiteral("#2077b2")));
     const QColor quote = marker;
+    // What the page's own text is drawn in. Bold, headings and table headers
+    // keep `text`, the theme's foreground, which is what makes them strong.
+    const QColor prose = proseForegroundFor(m_customBackground, m_customForeground, m_darkMode);
 
     m_formatFont = document() ? document()->defaultFont() : QFont();
 
@@ -469,7 +488,9 @@ void MarkdownHighlighter::rebuildFormats() {
                       : QColor::fromRgbF(text.redF() * (1 - fade) + marker.redF() * fade,
                                          text.greenF() * (1 - fade) + marker.greenF() * fade,
                                          text.blueF() * (1 - fade) + marker.blueF() * fade));
-        m_headingFormats[level].setFontWeight(QFont::Bold);
+        // The three large levels carry their size; bold on top of it is a
+        // shout. The three small ones need the weight to read as headings.
+        m_headingFormats[level].setFontWeight(level < 3 ? QFont::Normal : QFont::Bold);
         if (m_formatFont.pointSizeF() > 0) {
             m_headingFormats[level].setFontPointSize(m_formatFont.pointSizeF()
                                                      * headingScale[level]);
@@ -489,19 +510,19 @@ void MarkdownHighlighter::rebuildFormats() {
 
     m_italicFormat = QTextCharFormat();
     m_italicFormat.setFontItalic(true);
-    m_italicFormat.setForeground(text);
+    m_italicFormat.setForeground(prose);
 
     m_strikeFormat = QTextCharFormat();
     m_strikeFormat.setFontStrikeOut(true);
-    m_strikeFormat.setForeground(text);
+    m_strikeFormat.setForeground(prose);
 
     m_codeFormat = QTextCharFormat();
-    m_codeFormat.setForeground(text);
+    m_codeFormat.setForeground(prose);
     m_codeFormat.setProperty(InlineCodeProperty, true);
     m_codeFormat.setFontFamilies(m_codeFamilies);
 
     m_codeBlockFormat = QTextCharFormat();
-    m_codeBlockFormat.setForeground(text);
+    m_codeBlockFormat.setForeground(prose);
     m_codeBlockFormat.setFontFamilies(m_codeFamilies);
 
     m_fenceFormat = QTextCharFormat();
@@ -509,7 +530,7 @@ void MarkdownHighlighter::rebuildFormats() {
     m_fenceFormat.setFontFamilies(m_codeFamilies);
 
     m_tableFormat = QTextCharFormat();
-    m_tableFormat.setForeground(text);
+    m_tableFormat.setForeground(prose);
     m_tableFormat.setFontFamilies(m_tableFamilies);
 
     m_tablePipeFormat = m_tableFormat;
@@ -518,6 +539,7 @@ void MarkdownHighlighter::rebuildFormats() {
 
     m_tableHeaderFormat = m_tableFormat;
     m_tableHeaderFormat.setFontWeight(QFont::Bold);
+    m_tableHeaderFormat.setForeground(text);
 
     // What a marker inside a table cell has to give back to come out at zero
     // width. Measured in the table's own family, not the editor's: the two are

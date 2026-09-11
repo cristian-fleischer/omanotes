@@ -134,6 +134,11 @@ public:
     // Inline code sits on top of the page rather than in it, so its chip is
     // lifted where the block slab is let in.
     static QColor inlineCodeBackgroundFor(const QString &pageBackground, bool darkMode);
+    // Body text: the theme's foreground taken a step towards the page, so a
+    // page of prose does not glare and the headings and bold, which keep the
+    // foreground, have something to stand out from.
+    static QColor proseForegroundFor(const QString &pageBackground, const QString &foreground,
+                                     bool darkMode);
 
     // The colour list markers, pipes and fences are drawn in, so anything
     // drawn in their place matches them.

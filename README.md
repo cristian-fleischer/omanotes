@@ -101,7 +101,7 @@ The buffer is always your Markdown. These are drawn over it, never in it.
 
 | Written | Shown |
 | --- | --- |
-| `# ` to `###### ` | Six heading sizes, 1.9x down to 1.0x, the deeper ones fading. Markers hidden. |
+| `# ` to `###### ` | Six heading sizes, 1.9x down to 1.0x, the top three at regular weight and the deeper ones fading. Markers hidden. |
 | `**b**`, `*i*`, `***bi***`, `~~s~~` | Bold, italic, both, struck through. Markers hidden. |
 | `[text](url)`, `![alt](src)` | The text, underlined in the accent colour. Ctrl+click opens it. |
 | `` `code` `` | A rounded chip drawn behind the code, in the shade the sidebar uses. Backticks hidden. |
@@ -251,6 +251,11 @@ The background behind a fenced block is drawn as one rectangle behind the
 editor, not as a background on the characters, so it covers short lines, empty
 lines and the leading between rows alike. Its colour is a step down in lightness
 from the page, so it follows the palette rather than sitting on top of it.
+
+Body text is the palette's foreground taken a tenth of the way towards the
+page. Headings, bold and table headers keep the foreground itself, which is
+what makes them read as strong; at full contrast a page of prose glared and
+they had nothing to stand out from.
 
 Code and tables sit inside their slab rather than against its edges:
 `typography/blockPadding` insets their text as a block margin and bleeds the

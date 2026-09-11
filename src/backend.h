@@ -38,6 +38,7 @@ class Backend : public QObject {
     Q_PROPERTY(QString themeSelection READ themeSelection NOTIFY themeColorsChanged)
     Q_PROPERTY(QString themeCodeBackground READ themeCodeBackground NOTIFY themeColorsChanged)
     Q_PROPERTY(QString themeInlineCodeBackground READ themeInlineCodeBackground NOTIFY themeColorsChanged)
+    Q_PROPERTY(QString themeProseForeground READ themeProseForeground NOTIFY themeColorsChanged)
     // Whether this run was handed a file to read. Fixed for the life of the
     // process: a note opened later is a note, not the reason the window exists.
     Q_PROPERTY(bool startedWithFile READ startedWithFile CONSTANT)
@@ -89,6 +90,7 @@ public:
     QString themeSelection() const { return m_themeSelection; }
     QString themeCodeBackground() const;
     QString themeInlineCodeBackground() const;
+    QString themeProseForeground() const;
     QString themeMarker() const;
     int blockPadding() const { return m_blockPadding; }
     qreal proseLineHeight() const { return m_lineHeight; }
