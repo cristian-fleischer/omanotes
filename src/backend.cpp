@@ -41,11 +41,12 @@
 // Percentages of the line's own font size. Prose gets Typora's 140. Code gets
 // 100, the font's natural line spacing, because box-drawing characters only
 // tile into continuous lines at that height: any leading breaks a diagram's
-// verticals into dashes. Tables sit between, since a pipe never joins anyway.
+// verticals into dashes. Tables get the prose height too: at 120 the rows read
+// as a grid but a code chip in one row all but touched the chip in the next.
 // All three are settings, because the right answer depends on the font.
 constexpr qreal defaultLineHeightPercent = 140;
 constexpr qreal defaultCodeLineHeightPercent = 100;
-constexpr qreal defaultTableLineHeightPercent = 120;
+constexpr qreal defaultTableLineHeightPercent = 140;
 // Pixels at text scale 1, inside a code block or a table.
 constexpr int defaultBlockPadding = 12;
 const QString lastSaveDirectorySetting = QStringLiteral("file/lastSaveDirectory");

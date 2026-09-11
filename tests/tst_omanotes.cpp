@@ -1272,8 +1272,8 @@ private slots:
         };
 
         QCOMPARE(lineHeight(0), 140.0);  // prose
-        QCOMPARE(lineHeight(2), 120.0);  // table row
-        QCOMPARE(lineHeight(3), 120.0);  // separator row
+        QCOMPARE(lineHeight(2), 140.0);  // table row
+        QCOMPARE(lineHeight(3), 140.0);  // separator row
         // The font's natural spacing, so box-drawing characters tile.
         QCOMPARE(lineHeight(5), 100.0);  // opening fence
         QCOMPARE(lineHeight(6), 100.0);  // code
@@ -1319,7 +1319,7 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(editor.data(), "undo"));
         backend.editorTextChanged();
         QCOMPARE(lineHeight(0), 140.0);
-        QCOMPARE(lineHeight(2), 120.0);
+        QCOMPARE(lineHeight(2), 140.0);
         QCOMPARE(margins(0), (QPair<qreal, qreal>{0.0, 0.0}));
         QCOMPARE(backend.fencedCodeRegions().size(), 1);
     }

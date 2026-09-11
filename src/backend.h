@@ -271,7 +271,7 @@ private:
     // Percentages of the line's own font size, from settings.
     qreal m_lineHeight = 140;
     qreal m_codeLineHeight = 125;
-    qreal m_tableLineHeight = 120;
+    qreal m_tableLineHeight = 140;
     // Pixels at text scale 1, from settings.
     int m_blockPadding = 12;
     QString m_codeFontFamily;

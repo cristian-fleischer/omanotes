@@ -241,11 +241,10 @@ left full screen all come back on the next run.
 
 ## Line height and the code slab
 
-Prose is set at 140 percent of its own size. Table rows are tighter at 120 so
-they read as a grid, and fenced code sits at 100, the font's own spacing, which
-is what lets box-drawing characters tile into continuous rules. All three are
-settings under `typography/` in the config, since the right answer depends on
-the font.
+Prose and table rows are set at 140 percent of their own size, and fenced code
+at 100, the font's own spacing, which is what lets box-drawing characters tile
+into continuous rules. All three are settings under `typography/` in the config,
+since the right answer depends on the font.
 
 The background behind a fenced block is drawn as one rectangle behind the
 editor, not as a background on the characters, so it covers short lines, empty
