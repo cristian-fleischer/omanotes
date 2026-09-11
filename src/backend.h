@@ -46,6 +46,9 @@ class Backend : public QObject {
     // insets the text of code blocks and tables by this much; QML bleeds the
     // slab out by the same amount on all four sides.
     Q_PROPERTY(int blockPadding READ blockPadding CONSTANT)
+    // Prose line height as a percentage of the font's own, from
+    // typography/lineHeight. What a "line" is when the wheel scrolls by lines.
+    Q_PROPERTY(qreal proseLineHeight READ proseLineHeight CONSTANT)
     // What the sidebar should call the open note while its file is still the
     // placeholder a new note is created with. Empty once it has a real name.
     Q_PROPERTY(QString placeholderTitle READ placeholderTitle NOTIFY placeholderTitleChanged)
@@ -88,6 +91,7 @@ public:
     QString themeInlineCodeBackground() const;
     QString themeMarker() const;
     int blockPadding() const { return m_blockPadding; }
+    qreal proseLineHeight() const { return m_lineHeight; }
     static int countWords(const QString &text);
     static QString decodeFileContents(const QByteArray &bytes, LineEnding *lineEnding,
                                       bool *hasByteOrderMark);

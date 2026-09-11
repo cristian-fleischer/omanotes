@@ -753,6 +753,7 @@ ApplicationWindow {
 
             Flickable {
                 id: editorFlick
+                objectName: "editorFlick"
                 anchors.fill: parent
                 anchors.leftMargin: 24 - win.editorGutter
                 anchors.rightMargin: 24 - win.editorGutter
@@ -761,6 +762,7 @@ ApplicationWindow {
                 contentHeight: Math.max(height, editor.y + editor.implicitHeight + 220)
                 boundsBehavior: Flickable.StopAtBounds
                 ScrollBar.vertical: ScrollBar {
+                    id: editorScrollBar
                     policy: ScrollBar.AsNeeded
                     // Wheel scrolling moves contentY directly rather than
                     // flicking the Flickable, so the bar has to be told about
@@ -772,6 +774,21 @@ ApplicationWindow {
                     // anchors. Padding stops the thumb, the inset the track.
                     bottomPadding: win.scaledSize(32)
                     bottomInset: win.scaledSize(32)
+                    // Material's thumb is 13 px wide whenever the bar can be
+                    // dragged, which is always. A 6 px pill instead, in the
+                    // same colours; the style's own fade-in and fade-out still
+                    // apply, since they act on whatever the thumb is.
+                    contentItem: Rectangle {
+                        implicitWidth: win.scaledSize(6)
+                        implicitHeight: win.scaledSize(6)
+                        radius: width / 2
+                        color: editorScrollBar.pressed
+                            ? editorScrollBar.Material.scrollBarPressedColor
+                            : editorScrollBar.hovered
+                                ? editorScrollBar.Material.scrollBarHoveredColor
+                                : editorScrollBar.Material.scrollBarColor
+                        opacity: 0.0
+                    }
                 }
 
                 Timer {
@@ -782,11 +799,19 @@ ApplicationWindow {
                 // Flickable turns a wheel notch into a flick sized by the small
                 // application font, which crawls next to a browser. Reproduce
                 // Chromium's wheel physics instead (cc::ScrollOffsetAnimationCurve):
-                // each notch moves 3 lines of 40px towards a running target, the
-                // animation gets shorter as the outstanding distance grows, and a
-                // notch landing mid-animation carries the current velocity into
-                // the new curve, so sustained spinning keeps picking up speed.
-                readonly property real wheelStep: win.scaledSize(120)
+                // each notch moves towards a running target, the animation gets
+                // shorter as the outstanding distance grows, and a notch landing
+                // mid-animation carries the current velocity into the new curve,
+                // so sustained spinning keeps picking up speed.
+                //
+                // How far a notch moves is the one thing the desktop has a say
+                // in: the platform theme's wheelScrollLines (3 unless the
+                // desktop sets otherwise) times a line of prose at the current
+                // font and line height. A fixed pixel count was a browser's
+                // step in a window where every other program scrolls by lines.
+                readonly property real wheelStep:
+                    Math.max(1, Application.styleHints.wheelScrollLines)
+                    * writerFontMetrics.height * backend.proseLineHeight / 100
 
                 FrameAnimation {
                     id: wheelScroll

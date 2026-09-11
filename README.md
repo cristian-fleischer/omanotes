@@ -214,6 +214,7 @@ double-click gets once `xdg-mime default omanotes.desktop text/markdown` is set.
 - `Ctrl+Alt+N` creates a new note where you are pointing: the folder of the row picked in the sidebar, else the folder the open note lives in, else the vault root.
 - `Del` deletes the note picked in the sidebar, after asking. With no row picked it stays an ordinary editing key.
 - `Ctrl+=` and `Ctrl+-` scale the text, `Ctrl+0` puts it back, `Ctrl+wheel` does the same with the mouse.
+- A wheel notch scrolls by the desktop's wheel-scroll-lines, 3 unless the platform theme says otherwise, of prose at the current font and line height, on a browser's easing curve. A touchpad scrolls pixel for pixel as the compositor sends it.
 - `Ctrl+M` drops the 65-character measure and lets the text use the window, as does the rightmost footer icon.
 - `Ctrl+Shift+F` picks the editor font.
 - `Ctrl+click` opens a link, a bare URL, or a path that exists next to the note.
