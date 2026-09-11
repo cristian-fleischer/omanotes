@@ -9,6 +9,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QFontDatabase>
+#include <QFontMetricsF>
 #include <QDesktopServices>
 #include <QGuiApplication>
 #include <QMimeData>
@@ -782,9 +783,39 @@ QVariantList Backend::tableRegions() const {
             }
         }
         const bool drawsGrid = !columns.isEmpty();
+
+        // The rows either side of the separator, so the rule can be drawn
+        // halfway between their text. Either can be missing: a table can
+        // start or end with its separator.
+        int ruleAbove = -1;
+        int ruleBelow = -1;
+        if (drawsGrid && separator >= 0) {
+            const QTextBlock separatorBlock = m_document->findBlock(separator);
+            if (separatorBlock.previous().isValid()
+                    && separatorBlock.previous().userState() == MarkdownHighlighter::TableRow)
+                ruleAbove = separatorBlock.previous().position();
+            if (separatorBlock.next().isValid()
+                    && separatorBlock.next().userState() == MarkdownHighlighter::TableRow)
+                ruleBelow = separatorBlock.next().position();
+        }
+
+        // What the line height puts between two rows, in pixels: the space
+        // the grid extends by at its top and bottom so the end rows sit in
+        // cells like the rest. Measured off the first row once it is laid
+        // out, and off the font until then.
+        qreal rowHeight = 0;
+        if (first.layout() && first.layout()->lineCount() > 0)
+            rowHeight = first.layout()->lineAt(0).height();
+        else
+            rowHeight = QFontMetricsF(m_document->defaultFont()).height();
+        const qreal rowGap = rowHeight * qMax(0.0, m_tableLineHeight - 100) / 100;
+
         regions.append(QVariantMap{{QStringLiteral("start"), first.position()},
                                    {QStringLiteral("end"), previous.position()},
                                    {QStringLiteral("separator"), drawsGrid ? separator : -1},
+                                   {QStringLiteral("ruleAbove"), ruleAbove},
+                                   {QStringLiteral("ruleBelow"), ruleBelow},
+                                   {QStringLiteral("rowGap"), rowGap},
                                    {QStringLiteral("editing"), editing},
                                    {QStringLiteral("columns"), columns},
                                    {QStringLiteral("widths"), widths}});

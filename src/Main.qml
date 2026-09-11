@@ -249,8 +249,6 @@ ApplicationWindow {
         for (var t = 0; t < regions.length; ++t) {
             var head = editor.positionToRectangle(regions[t].start);
             var foot = editor.positionToRectangle(regions[t].end);
-            var rule = regions[t].separator >= 0
-                ? editor.positionToRectangle(regions[t].separator) : null;
             var columns = [];
             for (var c = 0; c < regions[t].columns.length; ++c) {
                 columns.push(Math.round(
@@ -258,10 +256,29 @@ ApplicationWindow {
             }
             if (regions[t].editing)
                 continue;
+            // The rule under the header sits halfway between the header's
+            // text and the body's, not through the folded separator row: the
+            // line height puts its leading under a line, so the separator's
+            // own slot is a sliver hard against the body.
+            var ruleY = -1;
+            if (regions[t].ruleAbove >= 0 && regions[t].ruleBelow >= 0) {
+                var above = editor.positionToRectangle(regions[t].ruleAbove);
+                var below = editor.positionToRectangle(regions[t].ruleBelow);
+                ruleY = Math.round((above.y + above.height + below.y) / 2);
+            } else if (regions[t].separator >= 0) {
+                var rule = editor.positionToRectangle(regions[t].separator);
+                ruleY = Math.round(rule.y + rule.height / 2);
+            }
+            // Rows are set apart by their leading, which the line height puts
+            // under each row. The first row has nothing above it and the last
+            // has its leading hanging below, so the grid extends by one row
+            // gap at both ends: the top and bottom rows then sit in their
+            // cells the way every other row does.
+            var gap = regions[t].rowGap;
             tables.push({
-                "y": head.y,
-                "height": foot.y + foot.height - head.y,
-                "ruleY": rule ? Math.round(rule.y + rule.height / 2) : -1,
+                "y": head.y - gap,
+                "height": foot.y + foot.height - head.y + 2 * gap,
+                "ruleY": ruleY,
                 "columns": columns
             });
         }

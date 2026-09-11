@@ -728,12 +728,25 @@ private slots:
         QCOMPARE(regions.at(1).toMap().value(QStringLiteral("widths")).toList(),
                  (QVariantList{11, 3}));
 
+        // The rule under the header is drawn between the header's text and
+        // the body's, so the region names both rows. And the grid extends by
+        // one row gap at each end, which is what the line height leaves
+        // between rows: with rows at 140 that is 40 percent of a row.
         QTextDocument *document =
             qobject_cast<QQuickTextDocument *>(
                 editor->property("textDocument").value<QObject *>())->textDocument();
         QVERIFY(document);
         document->setTextWidth(2000);
         (void)document->size();
+        const QVariantMap firstTable = regions.constFirst().toMap();
+        QCOMPARE(firstTable.value(QStringLiteral("ruleAbove")).toInt(),
+                 document->findBlockByNumber(0).position());
+        QCOMPARE(firstTable.value(QStringLiteral("ruleBelow")).toInt(),
+                 document->findBlockByNumber(2).position());
+        const qreal row = document->findBlockByNumber(0).layout()->lineAt(0).height();
+        QCOMPARE(backend.tableRegions().constFirst().toMap()
+                     .value(QStringLiteral("rowGap")).toReal(), row * 0.4);
+
         QCOMPARE(formatAt(*document, 1, 0).fontPointSize(), 1.0);
         QCOMPARE(formatAt(*document, 5, 0).fontPointSize(), 1.0);
         QVERIFY(sameXs(pipeXs(*document, 6), pipeXs(*document, 4)));
