@@ -269,14 +269,16 @@ ApplicationWindow {
                 ruleY = Math.round(rule.y + rule.height / 2);
             }
             // Rows are set apart by their leading, which the line height puts
-            // under each row. The first row has nothing above it and the last
-            // has its leading hanging below, so the grid extends by one row
-            // gap at both ends: the top and bottom rows then sit in their
-            // cells the way every other row does.
-            var gap = regions[t].rowGap;
+            // under each row, so between two rows there is one row gap and
+            // each row owns half of it. The first row has nothing above it
+            // and the last has its leading hanging below, so the grid extends
+            // by half a gap at both ends: the top and bottom rows then sit in
+            // their cells the way every other row does. A whole gap at each
+            // end read as too much air.
+            var pad = regions[t].rowGap / 2;
             tables.push({
-                "y": head.y - gap,
-                "height": foot.y + foot.height - head.y + 2 * gap,
+                "y": head.y - pad,
+                "height": foot.y + foot.height - head.y + 2 * pad,
                 "ruleY": ruleY,
                 "columns": columns
             });

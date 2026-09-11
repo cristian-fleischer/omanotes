@@ -729,9 +729,10 @@ private slots:
                  (QVariantList{11, 3}));
 
         // The rule under the header is drawn between the header's text and
-        // the body's, so the region names both rows. And the grid extends by
-        // one row gap at each end, which is what the line height leaves
-        // between rows: with rows at 140 that is 40 percent of a row.
+        // the body's, so the region names both rows. And the region reports
+        // the row gap, what the line height leaves between rows, which the
+        // grid extends by half of at each end: with rows at 140 the gap is 40
+        // percent of a row.
         QTextDocument *document =
             qobject_cast<QQuickTextDocument *>(
                 editor->property("textDocument").value<QObject *>())->textDocument();

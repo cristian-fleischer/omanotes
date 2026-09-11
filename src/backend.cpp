@@ -799,9 +799,9 @@ QVariantList Backend::tableRegions() const {
                 ruleBelow = separatorBlock.next().position();
         }
 
-        // What the line height puts between two rows, in pixels: the space
-        // the grid extends by at its top and bottom so the end rows sit in
-        // cells like the rest. Measured off the first row once it is laid
+        // What the line height puts between two rows, in pixels. The grid
+        // extends by half of it at its top and bottom, so the end rows own
+        // half a gap the way every row does. Measured off the first row once it is laid
         // out, and off the font until then.
         qreal rowHeight = 0;
         if (first.layout() && first.layout()->lineCount() > 0)
