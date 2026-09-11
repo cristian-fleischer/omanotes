@@ -383,6 +383,13 @@ void MarkdownHighlighter::setTableState(int revealedFirst, int revealedLast,
     }
 }
 
+void MarkdownHighlighter::refreshForDocumentFont() {
+    if (!document() || m_formatFont == document()->defaultFont())
+        return;
+    rebuildFormats();
+    rehighlight();
+}
+
 void MarkdownHighlighter::setSearch(const QString &query, int currentMatchStart) {
     if (m_searchQuery == query && m_currentMatchStart == currentMatchStart)
         return;

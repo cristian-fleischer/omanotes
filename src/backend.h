@@ -110,6 +110,9 @@ public:
     QString placeholderTitle() const;
 
     Q_INVOKABLE void attachDocument(QObject *textDocument);
+    // The editor's font changed, on a zoom step or a new family: the headings
+    // are sized from it and have to be redone.
+    Q_INVOKABLE void documentFontChanged();
     Q_INVOKABLE void openDialog();
     Q_INVOKABLE void open(const QUrl &url);
     Q_INVOKABLE void save();
@@ -246,6 +249,7 @@ private:
     BlockKind blockKind(const QTextBlock &block) const;
     qreal lineHeightFor(BlockKind kind) const;
     qreal blockMarginFor(BlockKind kind) const;
+    QPair<qreal, qreal> verticalMarginsFor(const QTextBlock &block, BlockKind kind) const;
     bool hasWantedTypography(const QTextBlock &block, BlockKind kind) const;
     void applyBlockTypography(QTextCursor &cursor, const QTextBlock &block, BlockKind kind);
     void scheduleRecovery();

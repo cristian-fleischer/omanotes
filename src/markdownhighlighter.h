@@ -121,6 +121,13 @@ public:
     // QFontInfo::fixedPitch() cannot be trusted, so this compares advances.
     static bool isMonospacedFamily(const QString &family);
 
+    // The document's default font has changed, as it does on every zoom step.
+    // Body text follows on its own; headings carry a pixel size of their own,
+    // worked out from the document font, so they have to be worked out again
+    // and every block redone. Nothing else notices a font change: no block is
+    // edited by it, and the check in highlightBlock() only runs when one is.
+    void refreshForDocumentFont();
+
     // Pin the family used for fenced code and inline code. Empty picks the best
     // available automatically.
     void setCodeFontFamily(const QString &family);

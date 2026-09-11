@@ -1145,6 +1145,10 @@ ApplicationWindow {
                     }
                     onCursorRectangleChanged: editorFlick.ensureCursorVisible()
                     onCursorPositionChanged: backend.setCursorPosition(cursorPosition)
+                    // A zoom step changes the font; the headings are sized
+                    // from it and have to be redone. Later, so the document
+                    // has the new font by the time it is read.
+                    onFontChanged: Qt.callLater(backend.documentFontChanged)
 
                     // Both handlers take the default DragThreshold policy, a
                     // passive grab, so the caret and selection still work

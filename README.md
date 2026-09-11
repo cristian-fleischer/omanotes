@@ -260,7 +260,10 @@ they had nothing to stand out from.
 Code and tables sit inside their slab rather than against its edges:
 `typography/blockPadding` insets their text as a block margin and bleeds the
 slab out by the same amount, so the space is equal on all four sides. Prose
-stays flush with the column.
+stays flush with the column. Where prose runs straight into a fence or a table
+with no blank line between, the run reserves that much room above or below
+itself, so the slab never lands on the text next to it; a blank line is room
+enough on its own and gets nothing extra.
 
 ## Fonts
 

@@ -1717,23 +1717,52 @@ qreal Backend::blockMarginFor(BlockKind kind) const {
     return kind == BlockKind::Prose ? 0.0 : m_blockPadding * m_textScale;
 }
 
+// The slab behind a code block or a table bleeds out by the block padding
+// above its first row and below its last. Where the neighbouring line is
+// blank the bleed lands on nothing; where prose runs straight into a fence,
+// as Markdown allows, it landed on the prose. So the outer rows of a run
+// reserve that space as a block margin when, and only when, the line next to
+// them has text on it: a blank line keeps the spacing it always had.
+QPair<qreal, qreal> Backend::verticalMarginsFor(const QTextBlock &block, BlockKind kind) const {
+    if (kind == BlockKind::Prose)
+        return {0.0, 0.0};
+    const auto needsRoom = [this, kind](const QTextBlock &neighbour) {
+        return neighbour.isValid() && blockKind(neighbour) != kind
+            && !neighbour.text().trimmed().isEmpty();
+    };
+    const qreal padding = blockMarginFor(kind);
+    return {needsRoom(block.previous()) ? padding : 0.0,
+            needsRoom(block.next()) ? padding : 0.0};
+}
+
 bool Backend::hasWantedTypography(const QTextBlock &block, BlockKind kind) const {
     const QTextBlockFormat format = block.blockFormat();
     const qreal margin = blockMarginFor(kind);
+    const QPair<qreal, qreal> vertical = verticalMarginsFor(block, kind);
     return format.lineHeightType() == QTextBlockFormat::ProportionalHeight
         && qFuzzyCompare(format.lineHeight(), lineHeightFor(kind))
         && qFuzzyCompare(format.leftMargin() + 1.0, margin + 1.0)
-        && qFuzzyCompare(format.rightMargin() + 1.0, margin + 1.0);
+        && qFuzzyCompare(format.rightMargin() + 1.0, margin + 1.0)
+        && qFuzzyCompare(format.topMargin() + 1.0, vertical.first + 1.0)
+        && qFuzzyCompare(format.bottomMargin() + 1.0, vertical.second + 1.0);
 }
 
 void Backend::applyBlockTypography(QTextCursor &cursor, const QTextBlock &block, BlockKind kind) {
     QTextBlockFormat blockFormat;
     blockFormat.setLineHeight(lineHeightFor(kind), QTextBlockFormat::ProportionalHeight);
     const qreal margin = blockMarginFor(kind);
+    const QPair<qreal, qreal> vertical = verticalMarginsFor(block, kind);
     blockFormat.setLeftMargin(margin);
     blockFormat.setRightMargin(margin);
+    blockFormat.setTopMargin(vertical.first);
+    blockFormat.setBottomMargin(vertical.second);
     cursor.setPosition(block.position());
     cursor.mergeBlockFormat(blockFormat);
+}
+
+void Backend::documentFontChanged() {
+    if (m_highlighter)
+        m_highlighter->refreshForDocumentFont();
 }
 
 QString Backend::themeMarker() const {
@@ -1934,6 +1963,17 @@ void Backend::reapplyTypographyToChange() {
             if (block.isValid())
                 touched.append(block);
         }
+    }
+
+    // A block's vertical margins depend on the lines either side of it, so a
+    // change to a line is a change to its neighbours' wants as well: emptying
+    // the line above a fence is what lets the fence give its room back.
+    const int touchedCount = touched.size();
+    for (int i = 0; i < touchedCount; ++i) {
+        if (touched.at(i).previous().isValid())
+            touched.append(touched.at(i).previous());
+        if (touched.at(i).next().isValid())
+            touched.append(touched.at(i).next());
     }
 
     QList<QPair<QTextBlock, BlockKind>> stale;

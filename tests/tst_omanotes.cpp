@@ -532,6 +532,95 @@ private slots:
         QSettings().remove(setting);
     }
 
+    // The slab bleeds out by the block padding above and below its run. Where
+    // prose runs straight into a fence, as Markdown allows, that bleed landed
+    // on the prose; the outer rows now reserve the room as a margin, and only
+    // when the line next to them has text on it.
+    void aRunNextToTextReservesItsRoom() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("fence.md"));
+        QFile seed(path);
+        QVERIFY(seed.open(QIODevice::WriteOnly));
+        seed.write("prose\n"
+                   "```\n"
+                   "code\n"
+                   "```\n"
+                   "prose after\n"
+                   "\n"
+                   "```\n"
+                   "more\n"
+                   "```\n"
+                   "\n"
+                   "after a blank\n"
+                   "| a | b |\n"
+                   "|---|---|\n"
+                   "| c | d |\n"
+                   "under the table\n");
+        seed.close();
+
+        QQmlEngine engine;
+        QScopedPointer<QObject> editor(createEditor(&engine));
+        QVERIFY(editor);
+        Backend backend;
+        backend.attachDocument(editor->property("textDocument").value<QObject *>());
+        backend.open(QUrl::fromLocalFile(path));
+        QTextDocument *document =
+            qobject_cast<QQuickTextDocument *>(
+                editor->property("textDocument").value<QObject *>())->textDocument();
+        QVERIFY(document);
+
+        const auto margins = [document](int number) {
+            const QTextBlockFormat format = document->findBlockByNumber(number).blockFormat();
+            return QPair<qreal, qreal>{format.topMargin(), format.bottomMargin()};
+        };
+        const qreal padding = backend.blockPadding();
+        QVERIFY(padding > 0);
+
+        // Text on both sides: room above the opening fence, below the closing.
+        QCOMPARE(margins(1), (QPair<qreal, qreal>{padding, 0.0}));
+        QCOMPARE(margins(2), (QPair<qreal, qreal>{0.0, 0.0}));
+        QCOMPARE(margins(3), (QPair<qreal, qreal>{0.0, padding}));
+        // Blank lines on both sides: the blank line is the room.
+        QCOMPARE(margins(6), (QPair<qreal, qreal>{0.0, 0.0}));
+        QCOMPARE(margins(8), (QPair<qreal, qreal>{0.0, 0.0}));
+        // A table works the same way.
+        QCOMPARE(margins(11), (QPair<qreal, qreal>{padding, 0.0}));
+        QCOMPARE(margins(13), (QPair<qreal, qreal>{0.0, padding}));
+        // Prose never carries any.
+        QCOMPARE(margins(0), (QPair<qreal, qreal>{0.0, 0.0}));
+        QCOMPARE(margins(4), (QPair<qreal, qreal>{0.0, 0.0}));
+
+        // Emptying the line above the first fence is what gives the room
+        // back: the fence has to notice a change to its neighbour.
+        QVERIFY(QMetaObject::invokeMethod(editor.data(), "remove", Q_ARG(int, 0), Q_ARG(int, 5)));
+        backend.editorTextChanged();
+        QCOMPARE(document->findBlockByNumber(0).text(), QString());
+        QCOMPARE(margins(1), (QPair<qreal, qreal>{0.0, 0.0}));
+    }
+
+    // A zoom step changes the document font. Body text follows on its own;
+    // a heading carries a size worked out from the font, so it has to be
+    // worked out again, and nothing edits a block to make that happen.
+    void headingsFollowTheDocumentFont() {
+        QTextDocument document;
+        document.setDefaultFont(bodyFont());
+        MarkdownHighlighter highlighter(&document);
+        setDocumentText(document, QStringLiteral("## Heading\nbody"));
+        QCOMPARE(formatAt(document, 0, 3).fontPointSize(), 12.0 * 1.6);
+
+        QFont larger = bodyFont();
+        larger.setPointSizeF(18.0);
+        document.setDefaultFont(larger);
+        highlighter.refreshForDocumentFont();
+        (void)document.size();
+        QCOMPARE(formatAt(document, 0, 3).fontPointSize(), 18.0 * 1.6);
+
+        // Told again with nothing changed, it does nothing.
+        highlighter.refreshForDocumentFont();
+        QCOMPARE(formatAt(document, 0, 3).fontPointSize(), 18.0 * 1.6);
+    }
+
     void rowMenusHaveNoEmptyRows() {
         const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
         QVERIFY(!mainQmlPath.isEmpty());
