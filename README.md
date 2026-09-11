@@ -29,8 +29,8 @@ per-note drafts and the typography knobs described below.
 - Syntax highlighting inside fenced blocks, from a statically linked Lexilla
 - A vault sidebar: folder tree, filter, and content search through ripgrep
 - Per-note drafts that survive switching notes, closing the window and a crash
-- Tables padded into alignment on request, never on open, with cells that
-  carry their own bold, italic, links and code spans
+- Tables drawn aligned however they were typed, with cells that carry their
+  own bold, italic, links and code spans; the bytes are padded only on request
 - Follows the desktop palette, dark mode and text size
 - Zoom, column width, fonts and line heights all in a plain INI file
 
@@ -109,7 +109,7 @@ The buffer is always your Markdown. These are drawn over it, never in it.
 | `---`, `***`, `___` | A rule across the page, which goes while the caret is on the line: `***` opens bold italic too. |
 | `* item` | A bullet drawn in the asterisk's own cell. `-` and `+` are left alone. |
 | `- [ ]`, `[ ]` | A checkbox, with or without a list marker. Click it to toggle. |
-| `\| a \| b \|` | A table: slab, bold header, a rule under it, and column rules once the source lines up. |
+| `\| a \| b \|` | A table: slab, bold header, a rule under it, column rules, and every column lined up whether or not the source is. |
 
 Anything folded away comes back when the caret is on its line, or anywhere
 inside the fenced block, so it can still be edited.
@@ -131,25 +131,31 @@ spans. Replacing Lexilla means writing one more adapter.
 
 ## Tables
 
-A table is padded so its columns line up when you move the caret out of one, or
-on `Ctrl+Shift+T`. Putting the caret in a table is what counts as working on it;
-opening a note, reading it and scrolling past change nothing, so a file you only
-read stays byte for byte what it was. One undo puts the table back as it was
-written, and a table that already lines up is left alone entirely rather than
-rewritten to the same bytes.
+Every table is drawn with its columns lined up, whatever its source looks like.
+`|a|b|`, `| a | b |` and a row indented past the margin all come out the same,
+under a grid, and the bytes stay exactly as typed. The rendering does what the
+aligner would have done to the file: each cell is drawn one space in, padded to
+its column, one space out, with the difference made up in the advance of a
+glyph rather than in characters. Nothing on disk changes for it, and nothing is
+marked modified.
 
-Column rules are drawn only through a table that lines up: half a grid reads
-worse than none. A table with no grid keeps everything it was written with, the
-separator row included, because there is no rule drawn to stand in for it.
+`Ctrl+Shift+T` pads the source of the table under the caret, for when you want
+the bytes aligned too, in another editor or in a diff. Because the layout and
+the aligner read the table the same way, nothing on screen moves when it runs.
+One undo puts the table back as it was written, and a table that already lines
+up is left alone rather than rewritten to the same bytes. That is the only time
+the app touches a table's bytes: not on open, not on typing, not when the caret
+leaves.
+
+Putting the caret in a table shows it as written, pipes and all, without a
+grid, and the columns stop lining up if the source does not. Moving out draws
+it aligned again.
 
 Cells carry bold, italic, strikethrough, links and code spans like the rest of a
 note. A column lines up because every glyph on the row has the same advance, and
 a monospace family keeps one advance across all four of its faces, so the styling
 itself moves nothing; the markers around it do go away, and the width they give
-up is added to the padding at the end of their own cell. Every cell therefore
-starts at its column, styled or not, and the pipes stay where the aligner put
-them. A row nobody has aligned has no padding to give, so its markers keep their
-width and only stop painting.
+up is padding like any other.
 
 ## The vault
 

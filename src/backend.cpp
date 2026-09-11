@@ -470,15 +470,6 @@ bool Backend::editorTextChanged() {
         reapplyTypographyToChange();
         m_formattedBlockCount = m_document->blockCount();
         updateTableGrids();
-
-        // Remember that this table was typed in, so it can be tidied when the
-        // caret leaves it.
-        if (!m_aligningTable) {
-            const QTextBlock caret = m_document->findBlockByNumber(m_activeBlockNumber);
-            const int run = tableRunStart(caret);
-            if (run >= 0)
-                m_editedTableFirstBlock = run;
-        }
     }
 
     scheduleWordCount();
@@ -694,6 +685,46 @@ QList<int> Backend::asteriskBulletPositions() const {
     return positions;
 }
 
+// What a run of table rows would be padded to: the cells of every row,
+// trimmed, and the width each column needs to hold the widest of them. This is
+// the one reading of a table's shape, shared by the aligner that writes it into
+// the source on request and by the layout that draws every table as if it had
+// been. The two must agree to the character, or aligning a table would move it.
+namespace {
+struct TableShape {
+    QList<QStringList> cells;
+    QList<bool> separators;
+    QList<int> widths;
+    int columns = 0;
+};
+
+TableShape tableShapeOf(const QStringList &rows) {
+    TableShape shape;
+    for (const QString &row : rows) {
+        // The outer pipes bound the row, so the cells are what lies between
+        // them; anything outside them is not a cell.
+        QStringList cells = row.split(QLatin1Char('|'));
+        if (cells.size() >= 2) {
+            cells.removeFirst();
+            cells.removeLast();
+        }
+        for (QString &cell : cells)
+            cell = cell.trimmed();
+        shape.cells.append(cells);
+        shape.separators.append(MarkdownHighlighter::isTableSeparator(row));
+        shape.columns = qMax(shape.columns, int(cells.size()));
+    }
+    shape.widths = QList<int>(shape.columns, 3);
+    for (int r = 0; r < shape.cells.size(); ++r) {
+        if (shape.separators.at(r))
+            continue;
+        for (int c = 0; c < shape.cells.at(r).size(); ++c)
+            shape.widths[c] = qMax(shape.widths.at(c), int(shape.cells.at(r).at(c).size()));
+    }
+    return shape;
+}
+} // namespace
+
 QVariantList Backend::tableRegions() const {
     QVariantList regions;
     if (!m_document)
@@ -702,45 +733,63 @@ QVariantList Backend::tableRegions() const {
     QTextBlock first;
     QTextBlock previous;
     int separator = -1;
-
-    // Character columns holding a pipe in every row of the run. Only those can
-    // be drawn as one continuous rule; a table whose source is not aligned has
-    // none in common and keeps the pipes it was written with.
-    QList<int> shared;
-    bool firstRow = true;
-    bool aligned = true;
+    QStringList rows;
 
     const auto flush = [&]() {
         if (!first.isValid())
             return;
-        // Column rules are only drawn through a table whose source lines up in
-        // every row. Half a grid, drawn through the one column that happens to
-        // agree, reads worse than no grid at all.
         // A table being edited shows the source it is written in: no rules
-        // drawn over it, nothing folded away.
+        // drawn over it, nothing folded away, nothing padded out. Every other
+        // table is drawn as if it had been aligned, so every other table gets
+        // its grid.
         const bool editing = m_revealedFirstBlock >= 0
             && first.blockNumber() <= m_revealedLastBlock
             && previous.blockNumber() >= m_revealedFirstBlock;
 
+        // Where the rules go. Each is a document offset, relative to the start
+        // of the run, of a pipe that the layout puts on that column boundary;
+        // QML measures it and draws the rule there. The header row has every
+        // pipe as a rule, but a row can stop short, so each boundary is taken
+        // from the first row that reaches it. The separator row is folded away
+        // whole, so its pipes have no position worth asking for.
         QVariantList columns;
-        if (aligned && !editing) {
-            for (int column : std::as_const(shared))
-                columns.append(column);
+        QVariantList widths;
+        if (!editing) {
+            const TableShape shape = tableShapeOf(rows);
+            for (int width : shape.widths)
+                widths.append(width);
+            for (int boundary = 0; boundary <= shape.columns; ++boundary) {
+                QTextBlock block = first;
+                for (int r = 0; r < rows.size(); ++r, block = block.next()) {
+                    if (shape.separators.at(r))
+                        continue;
+                    int seen = -1;
+                    int at = -1;
+                    for (int i = 0; i < rows.at(r).length(); ++i) {
+                        if (rows.at(r).at(i) != QLatin1Char('|'))
+                            continue;
+                        if (++seen == boundary) {
+                            at = i;
+                            break;
+                        }
+                    }
+                    if (at >= 0) {
+                        columns.append(block.position() - first.position() + at);
+                        break;
+                    }
+                }
+            }
         }
-        // The rule where the separator row was belongs to the grid. Drawn on
-        // its own across a table with no column rules it is a line sticking
-        // out past both ends of the text, which is the half grid again.
         const bool drawsGrid = !columns.isEmpty();
         regions.append(QVariantMap{{QStringLiteral("start"), first.position()},
                                    {QStringLiteral("end"), previous.position()},
                                    {QStringLiteral("separator"), drawsGrid ? separator : -1},
                                    {QStringLiteral("editing"), editing},
-                                   {QStringLiteral("columns"), columns}});
+                                   {QStringLiteral("columns"), columns},
+                                   {QStringLiteral("widths"), widths}});
         first = QTextBlock();
         separator = -1;
-        shared.clear();
-        firstRow = true;
-        aligned = true;
+        rows.clear();
     };
 
     for (QTextBlock block = m_document->begin(); block.isValid(); block = block.next()) {
@@ -749,20 +798,7 @@ QVariantList Backend::tableRegions() const {
                 first = block;
             if (separator < 0 && MarkdownHighlighter::isTableSeparator(block.text()))
                 separator = block.position();
-
-            const QString row = block.text();
-            QList<int> pipes;
-            for (int i = 0; i < row.length(); ++i) {
-                if (row.at(i) == QLatin1Char('|'))
-                    pipes.append(i);
-            }
-            if (firstRow) {
-                shared = pipes;
-                firstRow = false;
-            } else if (pipes != shared) {
-                aligned = false;
-            }
-
+            rows.append(block.text());
             previous = block;
             continue;
         }
@@ -779,31 +815,58 @@ void Backend::updateTableGrids() {
         return;
 
     QSet<int> gridded;
+    QHash<int, QList<int>> widths;
     const QVariantList regions = tableRegions();
     for (const QVariant &entry : regions) {
         const QVariantMap region = entry.toMap();
         if (region.value(QStringLiteral("columns")).toList().isEmpty())
             continue;
+        QList<int> columnWidths;
+        for (const QVariant &width : region.value(QStringLiteral("widths")).toList())
+            columnWidths.append(width.toInt());
         const QTextBlock last = m_document->findBlock(region.value(QStringLiteral("end")).toInt());
         for (QTextBlock block = m_document->findBlock(region.value(QStringLiteral("start")).toInt());
                 block.isValid(); block = block.next()) {
             gridded.insert(block.blockNumber());
+            widths.insert(block.blockNumber(), columnWidths);
             if (block == last)
                 break;
         }
     }
-    m_highlighter->setGriddedRows(gridded);
+    // All of it in one pass, the revealed range included: the caret entering
+    // a table changes all three for every row of it, and each was a pass.
+    m_highlighter->setTableState(m_revealedFirstBlock, m_revealedLastBlock, gridded, widths);
 }
 
-// The block number the caret's table run starts at, or -1.
-int Backend::tableRunStart(const QTextBlock &block) const {
-    if (!block.isValid() || block.userState() != MarkdownHighlighter::TableRow)
-        return -1;
-    QTextBlock first = block;
-    while (first.previous().isValid()
-            && first.previous().userState() == MarkdownHighlighter::TableRow)
-        first = first.previous();
-    return first.blockNumber();
+// The grid and the widths a text will have once it is the document, worked
+// out from its lines so the first highlight can start from them. Set from the
+// document afterwards the same state is found again and nothing is redone;
+// set only afterwards, every table row was laid out twice.
+QPair<QSet<int>, QHash<int, QList<int>>> Backend::tableStateOf(const QString &text) {
+    QSet<int> gridded;
+    QHash<int, QList<int>> widths;
+    const QStringList lines = text.split(QLatin1Char('\n'));
+    int runStart = -1;
+    const auto flush = [&](int runEnd) {
+        if (runStart < 0)
+            return;
+        const TableShape shape = tableShapeOf(lines.mid(runStart, runEnd - runStart));
+        for (int number = runStart; number < runEnd; ++number) {
+            gridded.insert(number);
+            widths.insert(number, shape.widths);
+        }
+        runStart = -1;
+    };
+    for (int number = 0; number < lines.size(); ++number) {
+        if (MarkdownHighlighter::isTableRow(lines.at(number))) {
+            if (runStart < 0)
+                runStart = number;
+            continue;
+        }
+        flush(number);
+    }
+    flush(lines.size());
+    return {gridded, widths};
 }
 
 bool Backend::alignTableAt(int position) {
@@ -823,37 +886,22 @@ bool Backend::alignTableAt(int position) {
     while (last.next().isValid() && last.next().userState() == MarkdownHighlighter::TableRow)
         last = last.next();
 
-    // Split each row on its pipes. The outer pipes bound the row, so the cells
-    // are what lies between them.
-    QList<QStringList> rows;
-    QList<bool> separators;
+    QStringList current;
     for (QTextBlock block = first; block.isValid(); block = block.next()) {
-        QStringList cells = block.text().split(QLatin1Char('|'));
-        if (cells.size() >= 2) {
-            cells.removeFirst();
-            cells.removeLast();
-        }
-        for (QString &cell : cells)
-            cell = cell.trimmed();
-        rows.append(cells);
-        separators.append(MarkdownHighlighter::isTableSeparator(block.text()));
+        current.append(block.text());
         if (block == last)
             break;
     }
-    if (rows.isEmpty())
+    if (current.isEmpty())
         return false;
 
-    int columns = 0;
-    for (const QStringList &row : std::as_const(rows))
-        columns = qMax(columns, int(row.size()));
-
-    QList<int> widths(columns, 3);
-    for (int r = 0; r < rows.size(); ++r) {
-        if (separators.at(r))
-            continue;
-        for (int c = 0; c < rows.at(r).size(); ++c)
-            widths[c] = qMax(widths.at(c), int(rows.at(r).at(c).size()));
-    }
+    // The same reading of the table the layout draws it from, so writing it
+    // out moves nothing on screen.
+    const TableShape shape = tableShapeOf(current);
+    const QList<QStringList> &rows = shape.cells;
+    const QList<bool> &separators = shape.separators;
+    const QList<int> &widths = shape.widths;
+    const int columns = shape.columns;
 
     QStringList aligned;
     for (int r = 0; r < rows.size(); ++r) {
@@ -883,12 +931,6 @@ bool Backend::alignTableAt(int position) {
     // Compare row by row rather than against a slice of the document: raw text
     // separates blocks with U+2029, so a join on "\n" never matched and every
     // pass rewrote a table that was already aligned.
-    QStringList current;
-    for (QTextBlock block = first; block.isValid(); block = block.next()) {
-        current.append(block.text());
-        if (block == last)
-            break;
-    }
     if (aligned == current)
         return false;
 
@@ -917,34 +959,6 @@ void Backend::setCursorPosition(int position) {
         m_document->findBlock(qBound(0, position, m_document->characterCount() - 1));
     if (!block.isValid())
         return;
-
-    // Leaving a table tidies it up, the way an editor reflows a paragraph when
-    // you move on. Putting the caret in one is what counts as working on it;
-    // opening a note, reading it and scrolling past change nothing.
-    bool tidied = false;
-    if (m_editedTableFirstBlock >= 0) {
-        const QTextBlock edited = m_document->findBlockByNumber(m_editedTableFirstBlock);
-        const bool stillInside = edited.isValid()
-            && block.userState() == MarkdownHighlighter::TableRow
-            && tableRunStart(block) == m_editedTableFirstBlock;
-        if (!stillInside) {
-            m_editedTableFirstBlock = -1;
-            if (edited.isValid()) {
-                m_aligningTable = true;
-                tidied = alignTableAt(edited.position());
-                m_aligningTable = false;
-            }
-        }
-    }
-
-    const bool followsLoad = m_cursorFollowsLoad;
-    m_cursorFollowsLoad = false;
-    if (!followsLoad && !m_aligningTable
-            && block.userState() == MarkdownHighlighter::TableRow) {
-        const int run = tableRunStart(block);
-        if (run >= 0)
-            m_editedTableFirstBlock = run;
-    }
 
     m_activeBlockNumber = block.blockNumber();
     m_highlighter->setActiveBlock(block.blockNumber());
@@ -993,13 +1007,13 @@ void Backend::setCursorPosition(int position) {
         || revealed.second != m_revealedLastBlock;
     m_revealedFirstBlock = revealed.first;
     m_revealedLastBlock = revealed.second;
-    m_highlighter->setRevealedRange(revealed.first, revealed.second);
 
     // A revealed table is not a gridded one, so which rows carry a grid has to
-    // be worked out again once the caret is recorded where it now is. Only when
-    // the range moved, which is when the caret enters or leaves a table or a
-    // fenced block, and not on every keystroke.
-    if (tidied || revealChanged)
+    // be worked out again once the caret is recorded where it now is, and the
+    // highlighter is handed the range, the grid and the widths together. Only
+    // when the range moved, which is when the caret enters or leaves a table
+    // or a fenced block, and not on every keystroke.
+    if (revealChanged)
         updateTableGrids();
 }
 
@@ -1097,6 +1111,15 @@ void Backend::loadDocumentText(const QString &text) {
     }
 
     m_loading = true;
+    // Nothing is revealed in a note that has just been opened, and every table
+    // in it is drawn with its grid. Told before the text is set, so the one
+    // highlight the setting does is the right one.
+    m_revealedFirstBlock = -1;
+    m_revealedLastBlock = -1;
+    if (m_highlighter) {
+        const auto state = tableStateOf(text);
+        m_highlighter->setTableState(-1, -1, state.first, state.second, false);
+    }
     m_document->setPlainText(text);
     m_lastDocumentText = text;
     m_loading = false;
@@ -1105,8 +1128,6 @@ void Backend::loadDocumentText(const QString &text) {
     m_wordCountTimer.stop();
     setWordCount(countWords(text));
     updateCurrentTitle(text);
-    m_editedTableFirstBlock = -1;
-    m_cursorFollowsLoad = true;
     emit documentLoaded();
 }
 
@@ -1754,14 +1775,17 @@ QVariantList Backend::inlineCodeRegions() const {
         // document itself holds, which for a plain-text buffer is nothing.
         QList<QPair<int, int>> spans;
         QList<QTextCharFormat> formats;
+        QList<QTextCharFormat> lastFormats;
         for (const QTextLayout::FormatRange &range : blockLayout->formats()) {
             if (!range.format.boolProperty(MarkdownHighlighter::InlineCodeProperty))
                 continue;
             if (!spans.isEmpty() && spans.last().second == range.start) {
                 spans.last().second = range.start + range.length;
+                lastFormats.last() = range.format;
             } else {
                 spans.append({range.start, range.start + range.length});
                 formats.append(range.format);
+                lastFormats.append(range.format);
             }
         }
         if (spans.isEmpty())
@@ -1783,7 +1807,17 @@ QVariantList Backend::inlineCodeRegions() const {
                     continue;
 
                 const qreal left = line.cursorToX(start);
-                const qreal right = line.cursorToX(end);
+                qreal right = line.cursorToX(end);
+                // In a table cell the last glyph of a span may be the one
+                // carrying the column's padding as letter spacing. The chip
+                // covers the glyph, not the padding after it.
+                const QTextCharFormat &last = lastFormats.at(s);
+                if (end == spans.at(s).second
+                        && last.fontLetterSpacingType() == QFont::PercentageSpacing
+                        && last.fontLetterSpacing() > 100.0) {
+                    const qreal glyphLeft = line.cursorToX(end - 1);
+                    right = glyphLeft + (right - glyphLeft) * 100.0 / last.fontLetterSpacing();
+                }
                 const qreal baseline = origin.y() + line.y() + line.ascent();
                 regions.append(QVariantMap{
                     {QStringLiteral("x"), origin.x() + qMin(left, right)},

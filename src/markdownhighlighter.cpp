@@ -310,41 +310,61 @@ void MarkdownHighlighter::setActiveBlock(int blockNumber) {
 }
 
 void MarkdownHighlighter::setGriddedRows(const QSet<int> &blockNumbers) {
-    if (m_griddedRows == blockNumbers || !document())
-        return;
+    setTableState(m_revealedFirst, m_revealedLast, blockNumbers, m_tableWidths);
+}
 
-    const QSet<int> changed = (m_griddedRows | blockNumbers) - (m_griddedRows & blockNumbers);
-    m_griddedRows = blockNumbers;
-    for (int number : changed) {
+void MarkdownHighlighter::setTableWidths(const QHash<int, QList<int>> &widths) {
+    setTableState(m_revealedFirst, m_revealedLast, m_griddedRows, widths);
+}
+
+void MarkdownHighlighter::setRevealedRange(int firstBlock, int lastBlock) {
+    setTableState(firstBlock, lastBlock, m_griddedRows, m_tableWidths);
+}
+
+// The three pieces of state a table row is drawn from, taken together, so a
+// row that all three change is redone once. The caret entering a table moves
+// the revealed range, takes the grid away and drops the widths in one go;
+// done as three steps it was three passes over every row of the table, and a
+// long table took a second to click into.
+void MarkdownHighlighter::setTableState(int revealedFirst, int revealedLast,
+                                        const QSet<int> &gridded,
+                                        const QHash<int, QList<int>> &widths, bool redo) {
+    QSet<int> changed;
+
+    // Every row of a table changes when the range moves, not only its ends the
+    // way a fenced block's rows do, so redo both ranges whole. A range is one
+    // block of code or one table.
+    if (revealedFirst != m_revealedFirst || revealedLast != m_revealedLast) {
+        for (int number = m_revealedFirst; number >= 0 && number <= m_revealedLast; ++number)
+            changed.insert(number);
+        for (int number = revealedFirst; number >= 0 && number <= revealedLast; ++number)
+            changed.insert(number);
+    }
+    if (gridded != m_griddedRows)
+        changed |= (m_griddedRows | gridded) - (m_griddedRows & gridded);
+    if (widths != m_tableWidths) {
+        for (auto it = widths.cbegin(); it != widths.cend(); ++it) {
+            if (m_tableWidths.value(it.key()) != it.value())
+                changed.insert(it.key());
+        }
+        for (auto it = m_tableWidths.cbegin(); it != m_tableWidths.cend(); ++it) {
+            if (!widths.contains(it.key()))
+                changed.insert(it.key());
+        }
+    }
+
+    m_revealedFirst = revealedFirst;
+    m_revealedLast = revealedLast;
+    m_griddedRows = gridded;
+    m_tableWidths = widths;
+
+    if (!redo || !document())
+        return;
+    for (int number : std::as_const(changed)) {
         const QTextBlock block = document()->findBlockByNumber(number);
         if (block.isValid())
             rehighlightBlock(block);
     }
-}
-
-void MarkdownHighlighter::setRevealedRange(int firstBlock, int lastBlock) {
-    if (m_revealedFirst == firstBlock && m_revealedLast == lastBlock)
-        return;
-
-    const int previousFirst = m_revealedFirst;
-    const int previousLast = m_revealedLast;
-    m_revealedFirst = firstBlock;
-    m_revealedLast = lastBlock;
-    if (!document())
-        return;
-
-    // Every row of a table changes when the range moves, not only its ends the
-    // way a fenced block's rows do, so redo both ranges whole. A range is one
-    // block of code or one table, so this is a handful of lines either way.
-    const auto redo = [this](int from, int to) {
-        for (int number = from; number >= 0 && number <= to; ++number) {
-            const QTextBlock block = document()->findBlockByNumber(number);
-            if (block.isValid())
-                rehighlightBlock(block);
-        }
-    };
-    redo(previousFirst, previousLast);
-    redo(firstBlock, lastBlock);
 }
 
 void MarkdownHighlighter::setSearch(const QString &query, int currentMatchStart) {
@@ -508,6 +528,10 @@ void MarkdownHighlighter::rebuildFormats() {
     tableMarkerFont.setPointSizeF(1.0);
     m_tableMarkerSpacing =
         -QFontMetricsF(tableMarkerFont).horizontalAdvance(QLatin1Char('*'));
+
+    QFont tableFont = m_formatFont;
+    tableFont.setFamilies(m_tableFamilies);
+    m_tableCharAdvance = QFontMetricsF(tableFont).horizontalAdvance(QLatin1Char(' '));
 
     m_quoteFormat = QTextCharFormat();
     m_quoteFormat.setForeground(quote);
@@ -686,9 +710,9 @@ bool MarkdownHighlighter::highlightTableRow(const QString &text) {
     const QTextCharFormat &pipeFormat = gridded ? m_hiddenMarkerFormat : m_tablePipeFormat;
 
     // The separator is scaffolding, so it collapses and a rule is drawn where
-    // it was. Only where one is drawn: a table whose source does not line up
-    // gets no rules, and folding the row away there would take the line
-    // between the header and the body with it.
+    // it was. Only where one is drawn: a table being edited shows what it is
+    // written in, and folding the row away there would take the line between
+    // the header and the body with it.
     if (isTableSeparator(text)) {
         setFormat(0, text.length(), gridded ? m_hiddenMarkerFormat : m_tableSeparatorFormat);
         return true;
@@ -698,21 +722,63 @@ bool MarkdownHighlighter::highlightTableRow(const QString &text) {
     const bool header = isTableSeparator(currentBlock().next().text());
     setFormat(0, text.length(), header ? m_tableHeaderFormat : m_tableFormat);
 
-    // A monospace font has one advance across all four of its faces, so bold
-    // and italic move nothing on their own; what would move a pipe is the
-    // markers going away, and foldMarkersInCell() gives that width back. While
-    // the caret is in the table the whole of it reads as source instead.
+    // Every table is drawn as if it had been aligned, whatever its source
+    // looks like: each cell is laid out to its column's width, with the
+    // difference made up in the advance of a space rather than in the bytes.
+    // While the caret is in the table the whole of it reads as source instead.
+    QList<int> pipeStretch;
     if (!active)
-        highlightTableMarkup(text);
+        pipeStretch = layoutTableRow(text);
 
+    int pipe = 0;
     for (int i = 0; i < text.length(); ++i) {
-        if (text.at(i) == QLatin1Char('|'))
-            setFormat(i, 1, pipeFormat);
+        if (text.at(i) != QLatin1Char('|'))
+            continue;
+        const int stretch = pipe < pipeStretch.size() ? pipeStretch.at(pipe) : 0;
+        setFormat(i, 1, stretch > 0 ? widenedPipe(pipeFormat, stretch, gridded) : pipeFormat);
+        ++pipe;
     }
     return true;
 }
 
-void MarkdownHighlighter::highlightTableMarkup(const QString &text) {
+// Characters of a table row that take no width: a marker, a space the aligner
+// would not have written, the indent before the first pipe. Folded in the
+// table's own family with a metric taken from it, so a proportional editor
+// font never leaves a fraction of a pixel behind on every fold; those add up
+// down a column.
+void MarkdownHighlighter::foldTableChars(int position, int length) {
+    QTextCharFormat blank = format(position);
+    blank.setForeground(QColor(Qt::transparent));
+    blank.setFontFamilies(m_tableFamilies);
+    blank.setFontPointSize(1.0);
+    blank.setFontLetterSpacingType(QFont::AbsoluteSpacing);
+    blank.setFontLetterSpacing(m_tableMarkerSpacing);
+    setFormat(position, length, blank);
+}
+
+// A pipe that has to carry space after it: the cell to its right was written
+// with no space of its own, or with nothing at all. A visible pipe grows by a
+// multiple of its own advance. A folded one is a point-size glyph whose
+// advance is cancelled in pixels, so what it carries is added in pixels too,
+// from the table font's own advance at the size it is drawn at.
+QTextCharFormat MarkdownHighlighter::widenedPipe(const QTextCharFormat &pipeFormat, int stretch,
+                                                 bool gridded) const {
+    QTextCharFormat widened = pipeFormat;
+    if (gridded) {
+        widened.setFontLetterSpacingType(QFont::AbsoluteSpacing);
+        widened.setFontLetterSpacing(pipeFormat.fontLetterSpacing()
+                                     + stretch * m_tableCharAdvance);
+    } else {
+        widened.setFontLetterSpacingType(QFont::PercentageSpacing);
+        widened.setFontLetterSpacing(100.0 * (1 + stretch));
+    }
+    return widened;
+}
+
+// Styles the cells of a row and lays each one out to its column. Returns, per
+// pipe, how many characters of space the pipe has to carry for the cell that
+// follows it.
+QList<int> MarkdownHighlighter::layoutTableRow(const QString &text) {
     const QList<InlineMarkup> markup = inlineMarkup(text);
     QList<Span> markers;
     for (const InlineMarkup &item : markup) {
@@ -754,62 +820,127 @@ void MarkdownHighlighter::highlightTableMarkup(const QString &text) {
         }
     }
 
+    const QList<int> widths = m_tableWidths.value(currentBlock().blockNumber());
+
+    // Whitespace outside the outer pipes is not a cell. Indented rows would
+    // otherwise start their columns at different places.
+    int firstPipe = text.indexOf(QLatin1Char('|'));
+    int lastPipe = text.lastIndexOf(QLatin1Char('|'));
+    if (firstPipe > 0)
+        foldTableChars(0, firstPipe);
+    if (lastPipe >= 0 && lastPipe + 1 < text.length())
+        foldTableChars(lastPipe + 1, text.length() - lastPipe - 1);
+
     // A cell runs from one pipe to the next.
-    int cellStart = 0;
-    for (int i = 0; i <= text.length(); ++i) {
-        if (i < text.length() && text.at(i) != QLatin1Char('|'))
+    QList<int> pipeStretch;
+    int cellStart = firstPipe + 1;
+    int column = 0;
+    for (int i = cellStart; i <= lastPipe; ++i) {
+        if (text.at(i) != QLatin1Char('|'))
             continue;
-        foldMarkersInCell(text, cellStart, i, markers);
+        const int width = column < widths.size() ? widths.at(column) : -1;
+        pipeStretch.append(layoutCell(text, cellStart, i, width, markers));
         cellStart = i + 1;
+        ++column;
     }
+    pipeStretch.append(0);
+    return pipeStretch;
 }
 
-// Markup in a table cell has to disappear without moving a pipe. Dropping the
-// markers to zero width would pull the rest of the row left, so the width they
-// give up is handed to the space the aligner left at the end of the cell: every
-// cell still starts at its column, whether or not it is styled, and the slack
-// collects where padding already is.
+// Lays one cell out to `width` characters of content, the way the aligner
+// would write it: one space, the content, padding, one space. Nothing in the
+// bytes moves; what moves is the advance of a glyph or two.
 //
-// That space is widened by a whole multiple of its own advance rather than by a
-// pixel figure, so the arithmetic needs no metric and holds at any zoom. Spread
-// over the whole run of padding it would be a fraction instead, and Qt rounds an
-// advance to a 64th of a pixel: a few rows of that and the column is ragged. A
-// cell with no padding to give (a row nobody has aligned) keeps its markers at
-// full width, painted transparent.
-void MarkdownHighlighter::foldMarkersInCell(const QString &text, int start, int end,
-                                            const QList<Span> &markers) {
+// The cell is what lies between two pipes, `start` to `end` exclusive. Its
+// markers fold to zero width, extra leading spaces fold, and the difference
+// between what is left and what the column needs is put on the last glyph as
+// a whole multiple of that glyph's own advance, so the arithmetic needs no
+// metric and holds at any zoom. A cell written with no space before its
+// content has that space carried by the pipe instead, which is what the return
+// value is: the characters the pipe before this cell has to carry.
+//
+// With no width known the cell keeps its own length and only the markers are
+// made good, on the space the aligner left at the end of the cell; a cell
+// with no such space keeps its markers at full width, painted transparent.
+int MarkdownHighlighter::layoutCell(const QString &text, int start, int end, int width,
+                                    const QList<Span> &markers) {
+    int leading = 0;
+    while (start + leading < end && text.at(start + leading) == QLatin1Char(' '))
+        ++leading;
+    int trailing = 0;
+    while (end - trailing - 1 >= start + leading && text.at(end - trailing - 1) == QLatin1Char(' '))
+        ++trailing;
+    const int content = end - start - leading - trailing;
+
     int hidden = 0;
     for (const Span &marker : markers) {
         if (marker.start >= start && marker.start + marker.length <= end)
             hidden += marker.length;
     }
-    if (hidden == 0)
-        return;
 
-    int padding = 0;
-    while (end - padding - 1 >= start && text.at(end - padding - 1) == QLatin1Char(' '))
-        ++padding;
-
-    for (const Span &marker : markers) {
-        if (marker.start < start || marker.start + marker.length > end)
-            continue;
-        QTextCharFormat blank = format(marker.start);
-        blank.setForeground(QColor(Qt::transparent));
-        if (padding > 0) {
-            blank.setFontPointSize(1.0);
-            blank.setFontLetterSpacingType(QFont::AbsoluteSpacing);
-            blank.setFontLetterSpacing(m_tableMarkerSpacing);
+    int pipeStretch = 0;
+    int stretch = 0;
+    int foldedLeading = 0;
+    if (width < 0) {
+        if (trailing == 0) {
+            for (const Span &marker : markers) {
+                if (marker.start < start || marker.start + marker.length > end)
+                    continue;
+                QTextCharFormat blank = format(marker.start);
+                blank.setForeground(QColor(Qt::transparent));
+                setFormat(marker.start, marker.length, blank);
+            }
+            return 0;
         }
-        setFormat(marker.start, marker.length, blank);
+        stretch = hidden;
+    } else {
+        if (leading == 0) {
+            pipeStretch = 1;
+        } else if (leading > 1) {
+            foldedLeading = leading - 1;
+            foldTableChars(start + 1, foldedLeading);
+        }
+        const int drawn = pipeStretch + qMin(leading, 1) + (content - hidden) + trailing;
+        stretch = width + 2 - drawn;
     }
 
-    if (padding == 0)
-        return;
+    for (const Span &marker : markers) {
+        if (marker.start >= start && marker.start + marker.length <= end)
+            foldTableChars(marker.start, marker.length);
+    }
 
-    QTextCharFormat wide = format(end - 1);
+    if (stretch < 0) {
+        // Too much padding was written: fold the excess, from the end, and
+        // keep at least the one space the aligner would have left.
+        foldTableChars(end + stretch, -stretch);
+        return pipeStretch;
+    }
+    if (stretch == 0)
+        return pipeStretch;
+
+    // The last glyph that is actually drawn carries the difference: not a
+    // marker, not a leading space that was folded. A cell with nothing drawn
+    // at all hands it to the pipe.
+    const auto folded = [&](int position) {
+        if (position > start && position <= start + foldedLeading)
+            return true;
+        for (const Span &marker : markers) {
+            if (position >= marker.start && position < marker.start + marker.length)
+                return true;
+        }
+        return false;
+    };
+    int carrier = end - 1;
+    while (carrier >= start && folded(carrier))
+        --carrier;
+    if (carrier < start)
+        return pipeStretch + stretch;
+
+    QTextCharFormat wide = format(carrier);
     wide.setFontLetterSpacingType(QFont::PercentageSpacing);
-    wide.setFontLetterSpacing(100.0 * (1 + hidden));
-    setFormat(end - 1, 1, wide);
+    wide.setFontLetterSpacing(100.0 * (1 + stretch));
+    setFormat(carrier, 1, wide);
+    return pipeStretch;
 }
 
 void MarkdownHighlighter::highlightSearch(const QString &text) {

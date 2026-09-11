@@ -4,6 +4,8 @@
 #include <QPointer>
 #include <QByteArray>
 #include <QHash>
+#include <QPair>
+#include <QSet>
 #include <QStringList>
 #include <QFileSystemWatcher>
 #include <QString>
@@ -149,8 +151,9 @@ public:
     Q_INVOKABLE QVariantList fencedCodeRegions() const;
     // Document position of each thematic break, so QML can draw the rule.
     Q_INVOKABLE QList<int> thematicBreakPositions() const;
-    // One entry per run of table rows: where it starts and ends, and where
-    // its separator row sits so a rule can be drawn there.
+    // One entry per run of table rows: where it starts and ends, where its
+    // separator row sits so a rule can be drawn there, where each column
+    // boundary falls, and the width each column is drawn at.
     Q_INVOKABLE QVariantList tableRegions() const;
     // Document position of each hidden `*` list marker.
     Q_INVOKABLE QList<int> asteriskBulletPositions() const;
@@ -158,11 +161,14 @@ public:
     // QML can draw a rounded chip behind it. A span that wraps gets one
     // rectangle per line it runs through.
     Q_INVOKABLE QVariantList inlineCodeRegions() const;
-    // Pad the table under the caret so its columns line up. An explicit
-    // edit, undoable, and the only thing here that rewrites the buffer.
+    // Pad the table under the caret so its columns line up in the source too.
+    // Every table is already drawn that way; this is for the bytes, on
+    // request only. An explicit edit, undoable, and the only thing here that
+    // rewrites the buffer.
     Q_INVOKABLE bool alignTableAt(int position);
     // For tests: the grid set is normally refreshed by an edit.
     void updateTableGridsForTest() { updateTableGrids(); }
+    static QPair<QSet<int>, QHash<int, QList<int>>> tableStateOf(const QString &text);
     // The caret's block shows its markers as written.
     Q_INVOKABLE void setCursorPosition(int position);
     Q_INVOKABLE QVariantMap viewState() const;
@@ -226,7 +232,6 @@ private:
     void scheduleWordCount();
     void applyDocumentTypography();
     void updateTableGrids();
-    int tableRunStart(const QTextBlock &block) const;
     void reapplyTypographyToChange();
     bool isCodeBlock(const QTextBlock &block) const;
     // What a block is styled as. Working it out costs a regex, so the
@@ -263,14 +268,6 @@ private:
     int m_activeBlockNumber = -1;
     int m_revealedFirstBlock = -1;
     int m_revealedLastBlock = -1;
-    // A table is tidied when the caret leaves it, and only if it was typed
-    // in: visiting one must not rewrite it, and opening a file must not
-    // touch anything at all.
-    int m_editedTableFirstBlock = -1;
-    // The caret is put at the top of a freshly loaded note by the view, not by
-    // the reader. That placement does not count as visiting what is there.
-    bool m_cursorFollowsLoad = false;
-    bool m_aligningTable = false;
     // Percentages of the line's own font size, from settings.
     qreal m_lineHeight = 140;
     qreal m_codeLineHeight = 125;

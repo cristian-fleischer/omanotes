@@ -33,6 +33,19 @@ public:
     // away; a table without a grid keeps the pipes it was written with.
     void setGriddedRows(const QSet<int> &blockNumbers);
 
+    // The width each column of a row's table is drawn at, by block number.
+    // Every row of a table carries the same list. A row not in the map keeps
+    // its own length. Only Backend can work these out: it takes the whole run
+    // of rows to know how wide a column is.
+    void setTableWidths(const QHash<int, QList<int>> &widths);
+
+    // All three at once, with one pass over the rows that any of them changed.
+    // With `redo` off the state is only recorded, for a document about to be
+    // set: its first highlight then starts from the right state, and nothing
+    // of the document being replaced is redone.
+    void setTableState(int revealedFirst, int revealedLast, const QSet<int> &gridded,
+                       const QHash<int, QList<int>> &widths, bool redo = true);
+
     // Carried on the block's user state so the next block knows whether it is
     // inside a fence, and so Backend::hiddenRangesAt can tell that a line of
     // code is not a line of Markdown.
@@ -143,8 +156,12 @@ private:
     int highlightCode(const QString &text, int languageIndex, int previousState);
     int languageIndexFor(const QString &language);
     bool highlightTableRow(const QString &text);
-    void highlightTableMarkup(const QString &text);
-    void foldMarkersInCell(const QString &text, int start, int end, const QList<Span> &markers);
+    QList<int> layoutTableRow(const QString &text);
+    void foldTableChars(int position, int length);
+    int layoutCell(const QString &text, int start, int end, int width,
+                   const QList<Span> &markers);
+    QTextCharFormat widenedPipe(const QTextCharFormat &pipeFormat, int stretch,
+                                bool gridded) const;
     bool highlightMarkers(const QString &text);
     void highlightSetextContent(const QString &text);
     void highlightInline(const QString &text);
@@ -183,6 +200,10 @@ private:
     QTextCharFormat m_tableSeparatorFormat;
     QTextCharFormat m_tableHeaderFormat;
     qreal m_tableMarkerSpacing = 0.0;
+    // A space's advance in the table font at the size it is drawn at, for a
+    // folded pipe that has to carry whole characters of space after it.
+    qreal m_tableCharAdvance = 0.0;
+    QHash<int, QList<int>> m_tableWidths;
     QTextCharFormat m_quoteFormat;
     QTextCharFormat m_linkFormat;
     QList<int> m_pendingSetextBlocks;

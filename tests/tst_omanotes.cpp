@@ -82,9 +82,11 @@ private slots:
 
     // Leaving a note with unsaved text used to stop and ask. It keeps the text
     // under that note instead, and the sidebar marks it.
-    // Fence rows and thematic breaks are punctuation, not content: they
-    // collapse until the caret is in the block they belong to.
-    void alignsATableThatWasTypedIn() {
+    // A ragged table is drawn as if it had been aligned, and its bytes are
+    // never touched for it: not on open, not on typing, not on leaving. Only
+    // Ctrl+Shift+T pads the source, and when it does nothing on screen moves,
+    // because the layout and the aligner read the table the same way.
+    void raggedTableIsDrawnAligned() {
         QTemporaryDir directory;
         QVERIFY(directory.isValid());
         const QString path = directory.filePath(QStringLiteral("table.md"));
@@ -93,7 +95,8 @@ private slots:
         seed.write("| Month | Savings |\n"
                    "|---|---|\n"
                    "| January | $250 |\n"
-                   "| February | $80 |\n"
+                   "|February|$80|\n"
+                   "  | March   |    $420   |\n"
                    "\n"
                    "after\n");
         seed.close();
@@ -109,63 +112,70 @@ private slots:
             qobject_cast<QQuickTextDocument *>(
                 editor->property("textDocument").value<QObject *>())->textDocument();
         QVERIFY(document);
+        document->setTextWidth(2000);
+        (void)document->size();
+        const auto line = [document](int number) {
+            return document->findBlockByNumber(number).text();
+        };
 
         // Opening a file changes nothing, whatever its tables look like.
         QVERIFY(!backend.modified());
-        QCOMPARE(document->findBlockByNumber(2).text(), QStringLiteral("| January | $250 |"));
+        QCOMPARE(line(1), QStringLiteral("|---|---|"));
+        QCOMPARE(line(3), QStringLiteral("|February|$80|"));
 
-        // Ragged source gets no column rules: half a grid reads worse than none.
-        QVERIFY(backend.tableRegions().constFirst().toMap()
-                    .value(QStringLiteral("columns")).toList().isEmpty());
+        // And yet it is drawn with a grid: three boundaries, two widths.
+        const QVariantMap region = backend.tableRegions().constFirst().toMap();
+        QCOMPARE(region.value(QStringLiteral("columns")).toList().size(), 3);
+        QCOMPARE(region.value(QStringLiteral("widths")).toList(),
+                 (QVariantList{8, 7}));
+        QVERIFY(region.value(QStringLiteral("separator")).toInt() >= 0);
 
-        // Typing in it and moving away tidies it.
+        // Every row puts its pipes where the header puts them: the one with no
+        // spaces, the one with too many, and the one indented past the margin.
+        const QList<qreal> drawn = pipeXs(*document, 0);
+        QCOMPARE(drawn.size(), 3);
+        for (int row : {2, 3, 4})
+            QVERIFY2(sameXs(pipeXs(*document, row), drawn), qPrintable(line(row)));
+        // The separator folds under its rule.
+        QCOMPARE(formatAt(*document, 1, 0).fontPointSize(), 1.0);
+
+        // Typing in it and moving away leaves the bytes exactly as typed.
         backend.setCursorPosition(document->findBlockByNumber(2).position());
         QVERIFY(QMetaObject::invokeMethod(
             editor.data(), "insert",
             Q_ARG(int, document->findBlockByNumber(2).position() + 2),
             Q_ARG(QString, QStringLiteral("x"))));
         backend.editorTextChanged();
-        backend.setCursorPosition(document->findBlockByNumber(5).position());
+        backend.setCursorPosition(document->findBlockByNumber(6).position());
+        QCOMPARE(line(1), QStringLiteral("|---|---|"));
+        QCOMPARE(line(2), QStringLiteral("| xJanuary | $250 |"));
+        QCOMPARE(line(3), QStringLiteral("|February|$80|"));
 
-        const QString header = document->findBlockByNumber(0).text();
-        for (int line = 1; line <= 3; ++line)
-            QCOMPARE(document->findBlockByNumber(line).text().size(), header.size());
-        QVERIFY(header.startsWith(QStringLiteral("| Month ")));
-
-        // Now every row has its pipes in the same columns, so the grid is drawn.
-        backend.updateTableGridsForTest();
-        const QVariantList columns = backend.tableRegions().constFirst().toMap()
-                                         .value(QStringLiteral("columns")).toList();
-        QCOMPARE(columns.size(), 3);
-
-        // Put the caret back in the table and it goes back to plain source:
-        // nothing drawn over it, wherever in the table the caret sits.
-        backend.setCursorPosition(document->findBlockByNumber(3).position());
-        const QVariantMap editing = backend.tableRegions().constFirst().toMap();
-        QCOMPARE(editing.value(QStringLiteral("editing")).toBool(), true);
-        QVERIFY(editing.value(QStringLiteral("columns")).toList().isEmpty());
-        QCOMPARE(editing.value(QStringLiteral("separator")).toInt(), -1);
-
-        // The pipes come back with it, on every row and not just the caret's.
-        document->setTextWidth(600);
+        // Ctrl+Shift+T is what pads the source. Afterwards the table is
+        // written the way it was already drawn, so the pipes do not move.
         (void)document->size();
-        QVERIFY(!qFuzzyCompare(formatAt(*document, 0, 0).fontPointSize(), 1.0));
-        QVERIFY(!qFuzzyCompare(formatAt(*document, 2, 0).fontPointSize(), 1.0));
-
-        // Leaving it again restores the grid.
-        backend.setCursorPosition(document->findBlockByNumber(5).position());
-        QCOMPARE(backend.tableRegions().constFirst().toMap()
-                     .value(QStringLiteral("editing")).toBool(), false);
+        const QList<qreal> before = pipeXs(*document, 3);
+        backend.setCursorPosition(document->findBlockByNumber(3).position());
+        QVERIFY(backend.alignTableAt(document->findBlockByNumber(3).position()));
+        backend.editorTextChanged();
+        backend.setCursorPosition(document->findBlockByNumber(6).position());
+        QCOMPARE(line(1), QStringLiteral("|----------|---------|"));
+        QCOMPARE(line(3), QStringLiteral("| February | $80     |"));
+        QCOMPARE(line(4), QStringLiteral("| March    | $420    |"));
+        (void)document->size();
+        QVERIFY(sameXs(pipeXs(*document, 3), before));
+        QVERIFY(sameXs(pipeXs(*document, 4), before));
 
         // One undo puts the table back exactly as it was written.
         QVERIFY(QMetaObject::invokeMethod(editor.data(), "undo"));
-        QCOMPARE(document->findBlockByNumber(1).text(), QStringLiteral("|---|---|"));
+        QCOMPARE(line(1), QStringLiteral("|---|---|"));
+        QCOMPARE(line(3), QStringLiteral("|February|$80|"));
     }
 
-    // Putting the caret in a table is what counts as working on it, so leaving
-    // one tidies it whether or not you typed in it. Visiting one that already
-    // lines up has to change nothing, or every click would dirty the note.
-    void alignsATableTheCaretVisited() {
+    // Putting the caret in a table shows its source and takes the grid away;
+    // taking it out again puts the grid back. Neither touches a byte, so a
+    // click on a table never dirties the note.
+    void visitingATableChangesNothing() {
         QTemporaryDir directory;
         QVERIFY(directory.isValid());
         const QString path = directory.filePath(QStringLiteral("visited.md"));
@@ -190,51 +200,35 @@ private slots:
             qobject_cast<QQuickTextDocument *>(
                 editor->property("textDocument").value<QObject *>())->textDocument();
         QVERIFY(document);
-        const auto line = [document](int number) {
-            return document->findBlockByNumber(number).text();
-        };
+        document->setTextWidth(2000);
         const int outside = document->findBlockByNumber(5).position();
+        const QString written = document->toPlainText();
 
-        // The view puts the caret at the top of a note it has just loaded.
-        // That is not the reader visiting anything.
-        backend.setCursorPosition(0);
-        backend.setCursorPosition(outside);
-        QVERIFY(!backend.editorTextChanged());
-        QVERIFY(!backend.modified());
-        QCOMPARE(line(1), QStringLiteral("|---|---|---|"));
-
-        // Caret in, caret out: tidied, without a character typed. The editor
-        // reports the change the same way it reports typing, which is what
-        // marks the note unsaved.
+        // Caret in: source, no grid, pipes visible on every row.
         backend.setCursorPosition(document->findBlockByNumber(2).position());
-        backend.setCursorPosition(outside);
-        QVERIFY(backend.editorTextChanged());
-        QVERIFY(backend.modified());
-        const QString header = line(0);
-        for (int row = 1; row <= 3; ++row)
-            QCOMPARE(line(row).size(), header.size());
-        QVERIFY(header.startsWith(QStringLiteral("| Day ")));
+        const QVariantMap editing = backend.tableRegions().constFirst().toMap();
+        QCOMPARE(editing.value(QStringLiteral("editing")).toBool(), true);
+        QVERIFY(editing.value(QStringLiteral("columns")).toList().isEmpty());
+        QCOMPARE(editing.value(QStringLiteral("separator")).toInt(), -1);
+        (void)document->size();
+        QVERIFY(!qFuzzyCompare(formatAt(*document, 0, 0).fontPointSize(), 1.0));
+        QVERIFY(!qFuzzyCompare(formatAt(*document, 3, 0).fontPointSize(), 1.0));
 
-        // Now the columns line up, so the grid is drawn over it.
-        QCOMPARE(backend.tableRegions().constFirst().toMap()
-                     .value(QStringLiteral("columns")).toList().size(), 4);
-
-        // Visiting it again is free: nothing to tidy, so nothing changes and
-        // the note does not go dirty behind you.
-        backend.save();
-        QVERIFY(!backend.modified());
-        const QString settled = line(0);
-        backend.setCursorPosition(document->findBlockByNumber(3).position());
+        // Caret out: the grid is back, and the pipes line up again.
         backend.setCursorPosition(outside);
+        const QVariantMap shown = backend.tableRegions().constFirst().toMap();
+        QCOMPARE(shown.value(QStringLiteral("editing")).toBool(), false);
+        QCOMPARE(shown.value(QStringLiteral("columns")).toList().size(), 4);
+        (void)document->size();
+        for (int row : {2, 3})
+            QVERIFY(sameXs(pipeXs(*document, row), pipeXs(*document, 0)));
+
+        // And not one byte moved.
         QVERIFY(!backend.editorTextChanged());
         QVERIFY(!backend.modified());
-        QCOMPARE(line(0), settled);
+        QCOMPARE(document->toPlainText(), written);
     }
 
-    // Setting the text moves the caret to the end of it, which is inside a
-    // table when the note ends with one. That is not the reader revealing
-    // anything, and the grid must not be worked out around it: the note came
-    // up with its last table drawn as rules and written out in pipes at once.
     // The sidebar's half of the drag: a target the rules accept becomes the
     // drop row, one they refuse does not, and letting go files the note. The
     // hit test that turns a cursor position into a row is a single indexAt and
@@ -585,6 +579,10 @@ private slots:
         QCOMPARE(discard->property("height").toReal(), 0.0);
     }
 
+    // Setting the text moves the caret to the end of it, which is inside a
+    // table when the note ends with one. That is not the reader revealing
+    // anything, and the grid must not be worked out around it: the note came
+    // up with its last table drawn as rules and written out in pipes at once.
     void aTableAtTheEndOfANoteIsStillGridded() {
         const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
         QVERIFY(!mainQmlPath.isEmpty());
@@ -632,28 +630,22 @@ private slots:
         (void)document->size();
 
         // Opening it changed nothing, whatever the caret did on the way in.
-        // The ragged table at the very end is where that shows: the caret
-        // lands in it, and tidying on the way out would rewrite it.
         QVERIFY(!backend.modified());
         QCOMPARE(document->findBlockByNumber(11).text(), QStringLiteral("|---|---|"));
 
+        // All three tables are drawn with a grid, the last one included: it
+        // is the one the caret passed through while the text was being set,
+        // and it is the ragged one, which is drawn aligned like any other.
         const QVariantList regions = backend.tableRegions();
         QCOMPARE(regions.size(), 3);
-        for (int table = 0; table < 2; ++table) {
+        for (int table = 0; table < 3; ++table) {
             const QVariantMap region = regions.at(table).toMap();
             QVERIFY(!region.value(QStringLiteral("editing")).toBool());
-            QVERIFY(!region.value(QStringLiteral("columns")).toList().isEmpty());
+            QCOMPARE(region.value(QStringLiteral("columns")).toList().size(), 3);
         }
-
-        // Both aligned tables fold their pipes, the second one included: it is
-        // the one the caret passed through while the text was being set.
-        for (int block : {2, 3, 4, 6, 7, 8})
+        for (int block : {2, 3, 4, 6, 7, 8, 10, 11, 12})
             QCOMPARE(formatAt(*document, block, 0).fontPointSize(), 1.0);
-
-        // The ragged one keeps everything it was written with.
-        QVERIFY(regions.at(2).toMap().value(QStringLiteral("columns")).toList().isEmpty());
-        for (int block : {10, 11, 12})
-            QVERIFY(!qFuzzyCompare(formatAt(*document, block, 0).fontPointSize(), 1.0));
+        QVERIFY(sameXs(pipeXs(*document, 12), pipeXs(*document, 10)));
     }
 
     // `***` opens bold italic as well as being a thematic break, so a rule
@@ -701,7 +693,10 @@ private slots:
         QCOMPARE(backend.thematicBreakPositions().size(), 2);
     }
 
-    void tableRegionsShareOnlyAlignedColumns() {
+    // Aligned or ragged, a table is drawn with its grid. The ragged one is
+    // laid out to the same widths the aligner would write, and its separator
+    // folds under a rule like any other.
+    void everyTableGetsAGrid() {
         QTemporaryDir directory;
         QVERIFY(directory.isValid());
         const QString path = directory.filePath(QStringLiteral("tables.md"));
@@ -725,33 +720,26 @@ private slots:
 
         const QVariantList regions = backend.tableRegions();
         QCOMPARE(regions.size(), 2);
+        for (const QVariant &entry : regions) {
+            const QVariantMap region = entry.toMap();
+            QCOMPARE(region.value(QStringLiteral("columns")).toList().size(), 3);
+            QVERIFY(region.value(QStringLiteral("separator")).toInt() >= 0);
+        }
+        QCOMPARE(regions.at(1).toMap().value(QStringLiteral("widths")).toList(),
+                 (QVariantList{11, 3}));
 
-        // Aligned source: every row has a pipe in the same three columns, so
-        // all three can be drawn as one continuous rule.
-        const QVariantMap aligned = regions.constFirst().toMap();
-        QCOMPARE(aligned.value(QStringLiteral("columns")).toList().size(), 3);
-        QVERIFY(aligned.value(QStringLiteral("separator")).toInt() >= 0);
-
-        // Ragged source shares only the columns that happen to line up, so
-        // nothing is drawn through a pipe that is not there, and with no
-        // column rules the separator rule goes too rather than hanging across
-        // the block on its own.
-        const QVariantMap ragged = regions.at(1).toMap();
-        QVERIFY(ragged.value(QStringLiteral("columns")).toList().isEmpty());
-        QCOMPARE(ragged.value(QStringLiteral("separator")).toInt(), -1);
-
-        // With no rule drawn for it, the separator row stays visible: folding
-        // it away would leave the header and the body with nothing between
-        // them at all.
         QTextDocument *document =
             qobject_cast<QQuickTextDocument *>(
                 editor->property("textDocument").value<QObject *>())->textDocument();
         QVERIFY(document);
-        document->setTextWidth(600);
+        document->setTextWidth(2000);
         (void)document->size();
-        QVERIFY(!qFuzzyCompare(formatAt(*document, 5, 0).fontPointSize(), 1.0));
-        // The aligned table's separator does fold, because a rule replaces it.
         QCOMPARE(formatAt(*document, 1, 0).fontPointSize(), 1.0);
+        QCOMPARE(formatAt(*document, 5, 0).fontPointSize(), 1.0);
+        QVERIFY(sameXs(pipeXs(*document, 6), pipeXs(*document, 4)));
+        // Two tables are two tables: the second is laid out to its own widths,
+        // not the first one's.
+        QVERIFY(!sameXs(pipeXs(*document, 4), pipeXs(*document, 0)));
     }
 
     void markersRevealWhereTheCaretIs() {
@@ -3011,6 +2999,34 @@ private:
             return nullptr;
         }
         return component->create();
+    }
+
+    // Where each pipe of a row is drawn, left to right, in document
+    // coordinates. Two rows of one table agree on this list exactly when their
+    // columns line up on screen, whatever their source looks like.
+    static QList<qreal> pipeXs(const QTextDocument &document, int blockNumber) {
+        QList<qreal> xs;
+        const QTextBlock block = document.findBlockByNumber(blockNumber);
+        const QTextLayout *layout = block.layout();
+        if (!layout || layout->lineCount() == 0)
+            return xs;
+        const qreal origin = document.documentLayout()->blockBoundingRect(block).x();
+        const QString text = block.text();
+        for (int i = 0; i < text.length(); ++i) {
+            if (text.at(i) == QLatin1Char('|'))
+                xs.append(origin + layout->lineAt(0).cursorToX(i));
+        }
+        return xs;
+    }
+
+    static bool sameXs(const QList<qreal> &a, const QList<qreal> &b) {
+        if (a.size() != b.size())
+            return false;
+        for (int i = 0; i < a.size(); ++i) {
+            if (qAbs(a.at(i) - b.at(i)) > 0.05)
+                return false;
+        }
+        return true;
     }
 
     // A highlighter's formats only reach the block layout when the document is
