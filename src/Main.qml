@@ -130,6 +130,10 @@ ApplicationWindow {
     }
 
     // Every hardcoded size in the interface is expressed at text scale 1.
+    // The strip along the bottom of the editor that holds the footer icons.
+    // It is painted in the page colour, so text scrolled under it is hidden.
+    readonly property int footerHeight: scaledSize(32)
+
     function scaledSize(pixels) {
         return Math.max(1, Math.round(pixels * win.textScale));
     }
@@ -789,8 +793,8 @@ ApplicationWindow {
                     // the word count in the bottom-right corner. Padding and
                     // inset, not anchors: the attached-ScrollBar layout overrides
                     // anchors. Padding stops the thumb, the inset the track.
-                    bottomPadding: win.scaledSize(32)
-                    bottomInset: win.scaledSize(32)
+                    bottomPadding: win.footerHeight
+                    bottomInset: win.footerHeight
                     // Material's thumb is 13 px wide whenever the bar can be
                     // dragged, which is always, in a 16 px track. A 4 px pill
                     // in a 10 px track instead, in the same colours; the
@@ -992,8 +996,10 @@ ApplicationWindow {
                     var cursorBottom = cursorTop + editor.cursorRectangle.height;
                     var maxContentY = Math.max(0, contentHeight - height);
 
-                    if (cursorBottom + margin > contentY + height)
-                        scrollTo(Math.min(maxContentY, cursorBottom + margin - height));
+                    // The footer strip covers the bottom of the viewport.
+                    var visibleHeight = height - win.footerHeight;
+                    if (cursorBottom + margin > contentY + visibleHeight)
+                        scrollTo(Math.min(maxContentY, cursorBottom + margin - visibleHeight));
                     else if (cursorTop - margin < contentY)
                         scrollTo(Math.max(0, cursorTop - margin));
                 }
@@ -1496,6 +1502,25 @@ ApplicationWindow {
                         backend.attachDocument(textDocument);
                         forceActiveFocus();
                     }
+                }
+            }
+
+            // Opaque, so text scrolled down to it goes under the footer rather
+            // than showing through the icons and the word count. It takes the
+            // clicks that land on it, so none reaches a caret position hidden
+            // underneath, and passes the wheel on to the page.
+            Rectangle {
+                objectName: "footerStrip"
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                height: win.footerHeight
+                color: win.pageColor
+
+                MouseArea {
+                    anchors.fill: parent
+                    acceptedButtons: Qt.AllButtons
+                    onWheel: function(wheel) { wheel.accepted = false; }
                 }
             }
 
