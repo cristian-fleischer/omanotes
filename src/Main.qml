@@ -226,6 +226,16 @@ ApplicationWindow {
     // that way comes out ragged where the lines are short and striped through
     // the leading. Measure each fenced run and paint one rectangle behind it.
     function updateCodeSlabs() {
+        // Source view draws nothing over the text.
+        if (backend.sourceView) {
+            win.codeSlabs = [];
+            win.thematicRules = [];
+            win.tableSlabs = [];
+            win.inlineCodeChips = [];
+            win.bullets = [];
+            return;
+        }
+
         var regions = backend.fencedCodeRegions();
         var slabs = [];
         for (var i = 0; i < regions.length; ++i) {
@@ -426,6 +436,12 @@ ApplicationWindow {
     }
 
     Shortcut {
+        sequence: "Ctrl+U"
+        context: Qt.ApplicationShortcut
+        onActivated: backend.sourceView = !backend.sourceView
+    }
+
+    Shortcut {
         sequence: "Ctrl+M"
         context: Qt.ApplicationShortcut
         onActivated: win.toggleFullWidth()
@@ -546,6 +562,8 @@ ApplicationWindow {
 
     Connections {
         target: backend
+
+        function onSourceViewChanged() { win.scheduleCodeSlabs(); }
 
         // Whatever route a file arrived by, the sidebar highlights it.
         function onFileUrlChanged() {
@@ -689,7 +707,7 @@ ApplicationWindow {
             spacing: 12
 
             Label {
-                text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+Alt+N  New Note Where You Are\nDel  Delete the Note Picked in the Sidebar\nCtrl+L  Toggle Sidebar\nCtrl+Shift+L  Focus the Note Filter\nCtrl+= / Ctrl+-  Zoom the Text\nCtrl+0  Reset the Zoom\nCtrl+M  Full Window Width\nCtrl+Shift+T  Align the Table\nCtrl+Shift+R  Discard Unsaved Changes\nCtrl+Shift+F  Editor Font\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
+                text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+Alt+N  New Note Where You Are\nDel  Delete the Note Picked in the Sidebar\nCtrl+L  Toggle Sidebar\nCtrl+Shift+L  Focus the Note Filter\nCtrl+= / Ctrl+-  Zoom the Text\nCtrl+0  Reset the Zoom\nCtrl+M  Full Window Width\nCtrl+U  Source View\nCtrl+Shift+T  Align the Table\nCtrl+Shift+R  Discard Unsaved Changes\nCtrl+Shift+F  Editor Font\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
                 lineHeight: 1.5
             }
 
@@ -1542,6 +1560,16 @@ ApplicationWindow {
                     opacity: 0.75
                     font.family: win.chromeFontFamily
                     font.pixelSize: win.scaledSize(11)
+                }
+
+                FooterIconButton {
+                    anchors.verticalCenter: parent.verticalCenter
+                    objectName: "sourceButton"
+                    iconName: "source"
+                    iconColor: backend.sourceView ? win.textColor : win.mutedColor
+                    opacity: 0.55
+                    tooltip: "Source view (Ctrl+U)"
+                    onClicked: backend.sourceView = !backend.sourceView
                 }
 
                 FooterIconButton {

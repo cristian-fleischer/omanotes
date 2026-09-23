@@ -196,6 +196,18 @@ void Backend::setTextScale(qreal textScale) {
     emit textScaleChanged();
 }
 
+// Line heights and the inset of code and tables are block formats, and
+// changing those goes on the undo stack, so they stay as they are. Only the
+// character formats go.
+void Backend::setSourceView(bool sourceView) {
+    if (m_sourceView == sourceView)
+        return;
+    m_sourceView = sourceView;
+    if (m_highlighter)
+        m_highlighter->setPlain(sourceView);
+    emit sourceViewChanged();
+}
+
 void Backend::attachDocument(QObject *textDocument) {
     auto *quickDocument = qobject_cast<QQuickTextDocument *>(textDocument);
     if (!quickDocument || !quickDocument->textDocument()) {
@@ -212,6 +224,7 @@ void Backend::attachDocument(QObject *textDocument) {
     m_highlighter->setDarkMode(m_darkMode);
     m_highlighter->setColors(m_themeBackground, m_themeForeground, m_themeAccent);
     m_highlighter->setCodeFontFamily(m_codeFontFamily);
+    m_highlighter->setPlain(m_sourceView);
 
     connect(m_document, &QTextDocument::contentsChange, this,
             [this](int position, int, int charsAdded) {
@@ -484,7 +497,8 @@ bool Backend::editorTextChanged() {
 
 QVariantList Backend::hiddenRangesAt(int position) const {
     QVariantList ranges;
-    if (!m_document)
+    // Source view hides nothing, so the caret has nothing to step over.
+    if (!m_document || m_sourceView)
         return ranges;
 
     const QTextBlock block =

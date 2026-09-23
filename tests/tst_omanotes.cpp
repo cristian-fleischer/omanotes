@@ -887,6 +887,92 @@ private slots:
         QCOMPARE(document->findBlockByNumber(2).text(), QStringLiteral("| ccccc | long |"));
     }
 
+    // Source view drops the styling and everything drawn over the text, and
+    // gives it all back. It is a view: the text, the modified flag and the
+    // undo history come through it untouched.
+    void sourceViewShowsTheNoteAsWritten() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("source.md"));
+        QFile seed(path);
+        QVERIFY(seed.open(QIODevice::WriteOnly));
+        seed.write("# Title\n"
+                   "\n"
+                   "Some **bold** text.\n"
+                   "\n"
+                   "| a | b |\n"
+                   "|---|---|\n"
+                   "| c | d |\n"
+                   "\n"
+                   "```sh\n"
+                   "ls\n"
+                   "```\n");
+        seed.close();
+
+        Backend backend;
+        VaultModel vault;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        engine.rootContext()->setContextProperty(QStringLiteral("vault"), &vault);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        backend.open(QUrl::fromLocalFile(path));
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+        QTextDocument *document =
+            qobject_cast<QQuickTextDocument *>(
+                editor->property("textDocument").value<QObject *>())->textDocument();
+        QVERIFY(document);
+        const auto hidden = [document](int line, int column) {
+            document->setTextWidth(600);
+            (void)document->size();
+            return qFuzzyCompare(formatAt(*document, line, column).fontPointSize(), 1.0);
+        };
+        const auto overlays = [&window]() {
+            return window->property("tableSlabs").toList().size()
+                + window->property("codeSlabs").toList().size();
+        };
+
+        // An edit to undo later, with the caret off every marker.
+        editor->setProperty("cursorPosition", 0);
+        QVERIFY(QMetaObject::invokeMethod(editor, "insert", Q_ARG(int, 0),
+                                          Q_ARG(QString, QStringLiteral("x"))));
+        editor->setProperty("cursorPosition", document->characterCount() - 1);
+        const QString text = editor->property("text").toString();
+        QVERIFY(hidden(2, 5));          // the `**` before "bold"
+        QVERIFY(hidden(5, 0));          // the folded separator row
+        QTRY_VERIFY(overlays() > 0);
+        const int boldRange = document->findBlockByNumber(2).position() + 5;
+        QVERIFY(!backend.hiddenRangesAt(boldRange).isEmpty());
+
+        backend.setSourceView(true);
+        QVERIFY(!hidden(2, 5));
+        QVERIFY(!hidden(5, 0));
+        QVERIFY(!hidden(8, 0));         // the opening fence
+        QCOMPARE(formatAt(*document, 0, 2).fontPointSize(),
+                 formatAt(*document, 2, 0).fontPointSize());
+        QVERIFY(backend.hiddenRangesAt(boldRange).isEmpty());
+        QTRY_COMPARE(overlays(), 0);
+        QCOMPARE(editor->property("text").toString(), text);
+        QVERIFY(editor->property("canUndo").toBool());
+
+        backend.setSourceView(false);
+        QVERIFY(hidden(2, 5));
+        QVERIFY(hidden(5, 0));
+        QTRY_VERIFY(overlays() > 0);
+        QCOMPARE(editor->property("text").toString(), text);
+
+        // The edit made before the round trip is still the one undo takes back.
+        QVERIFY(QMetaObject::invokeMethod(editor, "undo"));
+        QVERIFY(editor->property("text").toString().startsWith(QStringLiteral("# Title")));
+    }
+
     // `***` opens bold italic as well as being a thematic break, so a rule
     // must not be drawn across the page the moment the third asterisk lands.
     void noRuleUnderTheCaret() {

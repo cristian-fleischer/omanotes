@@ -401,6 +401,13 @@ void MarkdownHighlighter::refreshForDocumentFont() {
     rehighlight();
 }
 
+void MarkdownHighlighter::setPlain(bool plain) {
+    if (m_plain == plain)
+        return;
+    m_plain = plain;
+    rehighlight();
+}
+
 void MarkdownHighlighter::setSearch(const QString &query, int currentMatchStart) {
     if (m_searchQuery == query && m_currentMatchStart == currentMatchStart)
         return;
@@ -637,12 +644,7 @@ void MarkdownHighlighter::highlightBlock(const QString &text) {
         QMetaObject::invokeMethod(this, "rehighlight", Qt::QueuedConnection);
     }
 
-    if (highlightFencedCode(text)) {
-        highlightSearch(text);
-        return;
-    }
-
-    if (!text.isEmpty()) {
+    if (!highlightFencedCode(text) && !text.isEmpty()) {
         if (highlightTableRow(text)) {
             applyBlockState(TableRow);
         } else if (highlightMarkers(text)) {
@@ -652,6 +654,11 @@ void MarkdownHighlighter::highlightBlock(const QString &text) {
             highlightInline(text);
         }
     }
+
+    // The rules above still ran, for the block state they leave behind. Only
+    // what they drew is dropped.
+    if (m_plain)
+        setFormat(0, text.length(), QTextCharFormat());
 
     highlightSearch(text);
 }

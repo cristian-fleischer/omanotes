@@ -226,6 +226,7 @@ double-click gets once `xdg-mime default omanotes.desktop text/markdown` is set.
 - `Ctrl+=` and `Ctrl+-` scale the text, `Ctrl+0` puts it back, `Ctrl+wheel` does the same with the mouse.
 - A wheel notch scrolls by the desktop's wheel-scroll-lines, 3 unless the platform theme says otherwise, of prose at the current font and line height, on a browser's easing curve. A touchpad scrolls pixel for pixel as the compositor sends it.
 - `Ctrl+M` drops the 65-character measure and lets the text use the window, as does the rightmost footer icon.
+- `Ctrl+U` toggles source view, as does the `</>` footer icon: the note as written, in one font, with no markers folded away and no slabs, grids, chips or bullets drawn over it. Code and tables keep their inset and line height, because those are block formats and changing them would go on the undo stack. Not remembered across launches.
 - `Ctrl+Shift+F` picks the editor font.
 - `Ctrl+click` opens a link, a bare URL, or a path that exists next to the note.
 - `Ctrl+Shift+R` throws away the unsaved changes and reads the note back off the disk.

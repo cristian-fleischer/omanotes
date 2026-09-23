@@ -21,6 +21,11 @@ public:
     void setColors(const QString &background, const QString &foreground, const QString &accent);
     void setSearch(const QString &query, int currentMatchStart);
 
+    // Source view: every line drawn in the editor's own font, markers and all.
+    // Block states are still worked out, so fences and tables are known to
+    // everything that asks, and search matches still show.
+    void setPlain(bool plain);
+
     // The block the caret is in shows its markers as written. Everywhere
     // else they are hidden and something is drawn in their place.
     void setActiveBlock(int blockNumber);
@@ -185,6 +190,7 @@ private:
     void applyBlockState(int state);
 
     bool m_darkMode = true;
+    bool m_plain = false;
     QString m_customBackground;
     QString m_customForeground;
     QString m_customAccent;

@@ -78,6 +78,15 @@ Item {
                 context.moveTo(9.5, 6);
                 context.lineTo(11.5, 8);
                 context.lineTo(9.5, 10);
+            } else if (control.iconName === "source") {
+                context.moveTo(5.5, 4.5);
+                context.lineTo(2, 8);
+                context.lineTo(5.5, 11.5);
+                context.moveTo(10.5, 4.5);
+                context.lineTo(14, 8);
+                context.lineTo(10.5, 11.5);
+                context.moveTo(9, 3.5);
+                context.lineTo(7, 12.5);
             } else if (control.iconName === "sidebar") {
                 context.moveTo(2.5, 3.5);
                 context.lineTo(13.5, 3.5);
