@@ -1234,6 +1234,8 @@ ApplicationWindow {
                             replaceSelectionWith("\n");
                             return;
                         }
+                        if (tableReturn(lineStart))
+                            return;
                         var match = line.match(/^(\s*)([-+*]|\d+[.)]|>+)\s+(.*)$/);
                         if (match) {
                             if (match[3].length === 0) {
@@ -1248,6 +1250,62 @@ ApplicationWindow {
                             return;
                         }
                         replaceSelectionWith("\n\n");
+                    }
+
+                    // Enter in a table adds a row the way it adds a list item.
+                    // A paragraph break would end the table under the caret.
+                    // The new row gets as many cells as the widest of it and
+                    // the row above, all pipes written. Enter on a row with
+                    // nothing in it leaves the table, as on an empty item.
+                    function tableReturn(lineStart) {
+                        var lineEnd = text.indexOf("\n", cursorPosition);
+                        if (lineEnd < 0)
+                            lineEnd = text.length;
+                        var row = text.slice(lineStart, lineEnd);
+                        var isRow = /^\s*\|/;
+                        if (!isRow.test(row))
+                            return false;
+                        var cellsOf = function(line) {
+                            if (!isRow.test(line))
+                                return 0;
+                            var parts = line.trim().split("|");
+                            parts.shift();
+                            if (/\|\s*$/.test(line))
+                                parts.pop();
+                            return parts.length;
+                        };
+                        var above = "";
+                        if (lineStart > 0) {
+                            var aboveStart = text.lastIndexOf("\n", lineStart - 2) + 1;
+                            above = text.slice(aboveStart, lineStart - 1);
+                        }
+
+                        if (/^\s*\|[\s|]*$/.test(row)) {
+                            EditorMutations.replaceRange(editor, lineStart, lineEnd, "\n");
+                            return true;
+                        }
+
+                        // From the header the new row goes under the
+                        // separator, or it would become the header.
+                        var at = lineEnd;
+                        if (at < text.length) {
+                            var afterEnd = text.indexOf("\n", at + 1);
+                            if (afterEnd < 0)
+                                afterEnd = text.length;
+                            var after = text.slice(at + 1, afterEnd);
+                            if (/^\s*\|[\s|:-]*$/.test(after) && after.indexOf("-") >= 0)
+                                at = afterEnd;
+                        }
+
+                        var indent = row.match(/^\s*/)[0];
+                        var cells = Math.max(1, cellsOf(row), cellsOf(above));
+                        var next = indent + "|";
+                        for (var c = 0; c < cells; ++c)
+                            next += "  |";
+                        EditorMutations.replaceRange(editor, at, at, "\n" + next,
+                                                     1 + indent.length + 2,
+                                                     1 + indent.length + 2);
+                        return true;
                     }
 
                     function escapeMarkdownLinkText(linkText) {

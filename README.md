@@ -147,9 +147,19 @@ up is left alone rather than rewritten to the same bytes. That is the only time
 the app touches a table's bytes: not on open, not on typing, not when the caret
 leaves.
 
-Putting the caret in a table shows it as written, pipes and all, without a
-grid, and the columns stop lining up if the source does not. Moving out draws
-it aligned again.
+Putting the caret in a table, or on the line under it, shows it as written,
+pipes and all, without a grid, and the columns stop lining up if the source does
+not. Moving further out draws it aligned again.
+
+A row is any line that starts with a pipe. The closing pipe is optional, as in
+GFM, so a row being typed stays a row while each new cell is started. A row
+without one ends in a cell, drawn and lined up like the others; `Ctrl+Shift+T`
+closes it. The separator needs a dash, so a row of empty cells is a row.
+
+`Enter` in a table adds an empty row with every pipe written and puts the caret in
+its first cell. From the header the row goes under the separator. `Enter` on an
+empty row leaves the table with a blank line, the way it leaves a list.
+`Shift+Enter` still inserts a bare newline.
 
 Cells carry bold, italic, strikethrough, links and code spans like the rest of a
 note. A column lines up because every glyph on the row has the same advance, and

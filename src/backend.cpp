@@ -705,10 +705,12 @@ TableShape tableShapeOf(const QStringList &rows) {
     for (const QString &row : rows) {
         // The outer pipes bound the row, so the cells are what lies between
         // them; anything outside them is not a cell.
+        // A row without its closing pipe ends in a cell, which counts.
         QStringList cells = row.split(QLatin1Char('|'));
         if (cells.size() >= 2) {
             cells.removeFirst();
-            cells.removeLast();
+            if (MarkdownHighlighter::isClosedTableRow(row))
+                cells.removeLast();
         }
         for (QString &cell : cells)
             cell = cell.trimmed();
@@ -998,7 +1000,7 @@ void Backend::setCursorPosition(int position) {
     // Which run of fenced code or table rows the caret is in, if any. A
     // QSyntaxHighlighter sees one block at a time and cannot pair an opening
     // fence with its closing one, or know where a table starts.
-    const auto runContaining = [this, &block](bool code) {
+    const auto runContaining = [this](const QTextBlock &caret, bool code) {
         int first = -1;
         int last = -1;
         int runStart = -1;
@@ -1015,7 +1017,7 @@ void Backend::setCursorPosition(int position) {
                 continue;
             }
             if (runStart >= 0) {
-                if (block.blockNumber() >= runStart && block.blockNumber() <= runEnd) {
+                if (caret.blockNumber() >= runStart && caret.blockNumber() <= runEnd) {
                     first = runStart;
                     last = runEnd;
                     break;
@@ -1023,17 +1025,26 @@ void Backend::setCursorPosition(int position) {
                 runStart = -1;
             }
         }
-        if (first < 0 && runStart >= 0 && block.blockNumber() >= runStart
-                && block.blockNumber() <= runEnd) {
+        if (first < 0 && runStart >= 0 && caret.blockNumber() >= runStart
+                && caret.blockNumber() <= runEnd) {
             first = runStart;
             last = runEnd;
         }
         return QPair<int, int>{first, last};
     };
 
-    QPair<int, int> revealed = runContaining(true);
+    QPair<int, int> revealed = runContaining(block, true);
     if (revealed.first < 0)
-        revealed = runContaining(false);
+        revealed = runContaining(block, false);
+
+    // The line under a table still counts as in it: that is where the next
+    // row gets started, and the table must not snap to its grid and back
+    // while it is.
+    if (revealed.first < 0) {
+        const QTextBlock above = block.previous();
+        if (above.isValid() && above.userState() == MarkdownHighlighter::TableRow)
+            revealed = {runContaining(above, false).first, block.blockNumber()};
+    }
 
     const bool revealChanged = revealed.first != m_revealedFirstBlock
         || revealed.second != m_revealedLastBlock;

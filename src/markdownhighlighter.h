@@ -100,6 +100,9 @@ public:
     // rather than shown.
     static bool isTableSeparator(const QString &text);
 
+    // A row that ends in a pipe. One that does not ends in a cell.
+    static bool isClosedTableRow(const QString &text);
+
     // Where a `*` list marker sits in the line, or -1. The asterisk is
     // hidden and a bullet is drawn in its place.
     static int asteriskBulletColumn(const QString &text);

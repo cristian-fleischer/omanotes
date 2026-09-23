@@ -19,8 +19,11 @@ const QRegularExpression &fenceRe() {
     return re;
 }
 
+// A row starts with a pipe. The closing one is optional, as in GFM, so a row
+// being typed is a row from its first pipe and does not drop back to prose
+// every time a new cell is started.
 const QRegularExpression &tableRowRe() {
-    static const QRegularExpression re(QStringLiteral("^\\s*\\|.*\\|\\s*$"));
+    static const QRegularExpression re(QStringLiteral("^\\s*\\|"));
     return re;
 }
 
@@ -179,7 +182,15 @@ int MarkdownHighlighter::asteriskBulletColumn(const QString &text) {
 }
 
 bool MarkdownHighlighter::isTableSeparator(const QString &text) {
-    return ::isTableRow(text) && tableSeparatorRe().match(text).hasMatch();
+    // GFM wants a dash in every delimiter cell. Without one, a row of empty
+    // cells, which is what Enter writes, would be taken for the separator and
+    // folded away.
+    return ::isTableRow(text) && text.contains(QLatin1Char('-'))
+        && tableSeparatorRe().match(text).hasMatch();
+}
+
+bool MarkdownHighlighter::isClosedTableRow(const QString &text) {
+    return ::isTableRow(text) && text.trimmed().endsWith(QLatin1Char('|'));
 }
 
 bool MarkdownHighlighter::isFenceLine(const QString &text) {
@@ -853,11 +864,14 @@ QList<int> MarkdownHighlighter::layoutTableRow(const QString &text) {
 
     // Whitespace outside the outer pipes is not a cell. Indented rows would
     // otherwise start their columns at different places.
+    // A row without its closing pipe ends in a cell, which is laid out like
+    // any other rather than folded away.
+    const bool closed = isClosedTableRow(text);
     int firstPipe = text.indexOf(QLatin1Char('|'));
     int lastPipe = text.lastIndexOf(QLatin1Char('|'));
     if (firstPipe > 0)
         foldTableChars(0, firstPipe);
-    if (lastPipe >= 0 && lastPipe + 1 < text.length())
+    if (closed && lastPipe >= 0 && lastPipe + 1 < text.length())
         foldTableChars(lastPipe + 1, text.length() - lastPipe - 1);
 
     // A cell runs from one pipe to the next.
@@ -872,7 +886,12 @@ QList<int> MarkdownHighlighter::layoutTableRow(const QString &text) {
         cellStart = i + 1;
         ++column;
     }
-    pipeStretch.append(0);
+    if (closed) {
+        pipeStretch.append(0);
+    } else {
+        const int width = column < widths.size() ? widths.at(column) : -1;
+        pipeStretch.append(layoutCell(text, cellStart, text.length(), width, markers));
+    }
     return pipeStretch;
 }
 

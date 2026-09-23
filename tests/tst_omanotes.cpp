@@ -744,6 +744,149 @@ private slots:
         QVERIFY(sameXs(pipeXs(*document, 12), pipeXs(*document, 10)));
     }
 
+    // A table being written stays source from its first row to its last. Enter
+    // adds a whole row rather than a paragraph break, which would end the
+    // table, and a row typed by hand keeps the table revealed before its
+    // closing pipe lands.
+    void aTableBeingWrittenStaysSource() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        VaultModel vault;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        engine.rootContext()->setContextProperty(QStringLiteral("vault"), &vault);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+
+        const auto enterAt = [editor](int position) {
+            editor->setProperty("cursorPosition", position);
+            QMetaObject::invokeMethod(editor, "smartReturn", Q_ARG(QVariant, false));
+        };
+        const auto text = [editor]() { return editor->property("text").toString(); };
+        const auto caret = [editor]() { return editor->property("cursorPosition").toInt(); };
+
+        // From the last row: a new empty row, caret in its first cell.
+        const QString table = QStringLiteral("| a | b |\n|---|---|\n| c | d |");
+        editor->setProperty("text", table);
+        enterAt(table.length());
+        QCOMPARE(text(), table + QStringLiteral("\n|  |  |"));
+        QCOMPARE(caret(), table.length() + 3);
+
+        // Enter on that empty row leaves the table with a blank line.
+        enterAt(caret());
+        QCOMPARE(text(), table + QStringLiteral("\n\n"));
+
+        // From the header the row goes under the separator.
+        editor->setProperty("text", table);
+        enterAt(4);
+        QCOMPARE(text(), QStringLiteral("| a | b |\n|---|---|\n|  |  |\n| c | d |"));
+
+        // From the middle of a row the row is not split.
+        editor->setProperty("text", table);
+        enterAt(table.length() - 3);
+        QCOMPARE(text(), table + QStringLiteral("\n|  |  |"));
+
+        // A row typed by hand keeps the table revealed.
+        const QString typing = table + QStringLiteral("\n| e | f");
+        editor->setProperty("text", typing);
+        editor->setProperty("cursorPosition", 0);
+        editor->setProperty("cursorPosition", typing.length());
+        const QVariantList regions = backend.tableRegions();
+        QCOMPARE(regions.size(), 1);
+        QVERIFY(regions.first().toMap().value(QStringLiteral("editing")).toBool());
+
+        // Without its closing pipe it is a row all the same, as in GFM, so it
+        // does not drop back to prose while the next cell is typed.
+        QCOMPARE(regions.first().toMap().value(QStringLiteral("end")).toInt(),
+                 typing.lastIndexOf(QLatin1Char('\n')) + 1);
+
+        // Its Enter still counts: the row above gives the shape.
+        enterAt(typing.length());
+        QCOMPARE(text(), typing + QStringLiteral("\n|  |  |"));
+
+        // A row of empty cells is a row, not the separator.
+        QVERIFY(!MarkdownHighlighter::isTableSeparator(QStringLiteral("|  |  |")));
+        QVERIFY(MarkdownHighlighter::isTableSeparator(QStringLiteral("|:--|--:|")));
+
+        // The line under a table counts as in it; the one under that does not.
+        const QString below = table + QStringLiteral("\n\nafter");
+        editor->setProperty("text", below);
+        const auto editingWithCaretAt = [&](int position) {
+            editor->setProperty("cursorPosition", position == 0 ? 1 : 0);
+            editor->setProperty("cursorPosition", position);
+            return backend.tableRegions().first().toMap()
+                .value(QStringLiteral("editing")).toBool();
+        };
+        QVERIFY(!editingWithCaretAt(below.length()));
+        QVERIFY(editingWithCaretAt(table.length() + 1));
+        QVERIFY(editingWithCaretAt(0));
+        QVERIFY(!editingWithCaretAt(below.length()));
+        const QString prose = table + QStringLiteral("\nprose");
+        editor->setProperty("text", prose);
+        editor->setProperty("cursorPosition", 0);
+        QVERIFY(editingWithCaretAt(prose.length()));
+
+        // Prose keeps its paragraph break.
+        editor->setProperty("text", QStringLiteral("prose"));
+        enterAt(5);
+        QCOMPARE(text(), QStringLiteral("prose\n\n"));
+    }
+
+    // A row left without its closing pipe ends in a cell. Under the grid that
+    // cell is drawn and lined up like any other, and the aligner closes the
+    // row rather than dropping what was in it.
+    void anUnclosedRowKeepsItsLastCell() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("unclosed.md"));
+        QFile seed(path);
+        QVERIFY(seed.open(QIODevice::WriteOnly));
+        seed.write("| a | b |\n"
+                   "|---|---|\n"
+                   "| ccccc | long\n"
+                   "\n"
+                   "after\n");
+        seed.close();
+
+        QQmlEngine engine;
+        QScopedPointer<QObject> editor(createEditor(&engine));
+        QVERIFY(editor);
+        Backend backend;
+        backend.attachDocument(editor->property("textDocument").value<QObject *>());
+        backend.open(QUrl::fromLocalFile(path));
+        QTextDocument *document =
+            qobject_cast<QQuickTextDocument *>(
+                editor->property("textDocument").value<QObject *>())->textDocument();
+        QVERIFY(document);
+
+        backend.setCursorPosition(document->findBlockByNumber(4).position());
+        document->setTextWidth(600);
+        (void)document->size();
+
+        const QVariantMap region = backend.tableRegions().first().toMap();
+        QVERIFY(!region.value(QStringLiteral("editing")).toBool());
+        QCOMPARE(region.value(QStringLiteral("widths")).toList(),
+                 (QVariantList{5, 4}));
+        for (int column = 10; column < 14; ++column)
+            QVERIFY(!qFuzzyCompare(formatAt(*document, 2, column).fontPointSize(), 1.0));
+
+        const auto xOf = [document](int line, int column) {
+            const QTextBlock block = document->findBlockByNumber(line);
+            return document->documentLayout()->blockBoundingRect(block).x()
+                + block.layout()->lineAt(0).cursorToX(column);
+        };
+        QVERIFY(qAbs(xOf(0, 6) - xOf(2, 10)) < 0.05);   // `b` over `long`
+
+        QVERIFY(backend.alignTableAt(0));
+        QCOMPARE(document->findBlockByNumber(2).text(), QStringLiteral("| ccccc | long |"));
+    }
+
     // `***` opens bold italic as well as being a thematic break, so a rule
     // must not be drawn across the page the moment the third asterisk lands.
     void noRuleUnderTheCaret() {
