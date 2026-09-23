@@ -33,6 +33,11 @@ private slots:
         // Keeps recovery snapshots out of the real ~/.local/share/omanotes.
         QStandardPaths::setTestModeEnabled(true);
         QQuickStyle::setStyle(QStringLiteral("Material"));
+        // Tests click Open, Save and the vault folder button. With native
+        // dialogs each click is a real xdg-desktop-portal request, and the
+        // portal puts a file chooser on the desktop the tests run on. The
+        // Quick implementation stays inside the offscreen window.
+        QCoreApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
 
         // main() loads these out of the binary's resources. The tests build no
         // resources, so load the files the resources are made from: without
