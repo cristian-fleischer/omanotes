@@ -3522,6 +3522,62 @@ private slots:
             QVERIFY2(warning.contains(QStringLiteral("Binding loop")), qPrintable(warning));
     }
 
+    // Qt makes nodes for the lines in view only, and only of a text it was told
+    // is long. Ours goes in underneath it.
+    void drawsOnlyWhatShowsOfALongNote() {
+        Backend backend;
+        VaultModel vault;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        engine.rootContext()->setContextProperty(QStringLiteral("vault"), &vault);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(QFINDTESTDATA("../src/Main.qml")));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+        auto *editor = window->findChild<QQuickItem *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+
+        backend.open(QUrl::fromLocalFile(QFINDTESTDATA("corpus/large.md")));
+        QVERIFY(editor->flags().testFlag(QQuickItem::ItemObservesViewport));
+        backend.open(QUrl::fromLocalFile(QFINDTESTDATA("corpus/unicode.md")));
+        QVERIFY(!editor->flags().testFlag(QQuickItem::ItemObservesViewport));
+        QVERIFY(QMetaObject::invokeMethod(editor, "insert", Q_ARG(int, 0),
+                                          Q_ARG(QString, QString(20000, QLatin1Char('x')))));
+        QVERIFY(editor->flags().testFlag(QQuickItem::ItemObservesViewport));
+        backend.closeFile();
+    }
+
+    // A long note is laid out once, with its formats already on it: every line
+    // is what the highlighter then says it is.
+    void loadsWithTheFormatsItKeeps() {
+        QTemporaryDir directory;
+        const QString path = directory.filePath(QStringLiteral("kinds.md"));
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("---\nkey: v\n---\ntext\n```sh\n| not | a row |\n~~~\n| a row |\n"
+                   "```\n|not|\n```\n\n| a | b |\n|---|---|\n| 1 | 2 |\nend `x` ~~y~~\n");
+        file.close();
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> editor(createEditor(&engine));
+        QVERIFY(editor);
+        backend.attachDocument(editor->property("textDocument").value<QObject *>());
+        QTextDocument *document = editor->property("textDocument")
+                                      .value<QQuickTextDocument *>()->textDocument();
+        backend.open(QUrl::fromLocalFile(path));
+        QList<QTextBlockFormat> loaded;
+        for (QTextBlock block = document->begin(); block.isValid(); block = block.next())
+            loaded.append(block.blockFormat());
+        // The full pass over the highlighted document changes nothing.
+        backend.setTextScale(1.5);
+        backend.setTextScale(1.0);
+        for (QTextBlock block = document->begin(); block.isValid(); block = block.next())
+            QVERIFY2(block.blockFormat() == loaded.at(block.blockNumber()),
+                     qPrintable(block.text()));
+        QVERIFY(!document->isUndoAvailable());
+        QVERIFY(document->isUndoRedoEnabled());
+        QVERIFY(!backend.modified());
+    }
+
     void scalesTextWithDesktopTextSize() {
         const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
         QVERIFY(!mainQmlPath.isEmpty());

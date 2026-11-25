@@ -15,6 +15,7 @@
 #include <memory>
 
 class MarkdownHighlighter;
+class QQuickItem;
 class QTextBlock;
 class QTextCursor;
 class QTextDocument;
@@ -264,6 +265,7 @@ private:
     void refreshWordCount();
     void scheduleWordCount();
     void applyDocumentTypography();
+    void drawOnlyWhatShows(qsizetype length);
     void formatAllBlocks(QTextCursor &cursor);
     void updateTableGrids();
     void reapplyTypographyToChange(int throughBlock = -1);
@@ -323,6 +325,7 @@ private:
     QTimer m_recoveryTimer;
     QFileSystemWatcher m_fileWatcher;
     QPointer<QTextDocument> m_document;
+    QPointer<QQuickItem> m_editorItem;
     QPointer<QWindow> m_parentWindow;
     QPointer<MarkdownHighlighter> m_highlighter;
     QString m_lastDocumentText;

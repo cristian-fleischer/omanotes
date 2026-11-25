@@ -16,6 +16,7 @@
 #include <QProcess>
 #include <QPrintDialog>
 #include <QPrinter>
+#include <QQuickItem>
 #include <QQuickTextDocument>
 #include <QRegularExpression>
 #include <QSettings>
@@ -220,6 +221,7 @@ void Backend::attachDocument(QObject *textDocument) {
         delete m_highlighter.data();
 
     m_document = quickDocument->textDocument();
+    m_editorItem = qobject_cast<QQuickItem *>(quickDocument->parent());
     m_lastDocumentText = m_document->toPlainText();
     m_highlighter = new MarkdownHighlighter(m_document);
     m_highlighter->setDarkMode(m_darkMode);
@@ -479,6 +481,7 @@ bool Backend::editorTextChanged() {
     if (text == m_lastDocumentText)
         return false;
     m_lastDocumentText = text;
+    drawOnlyWhatShows(text.size());
 
     if (m_document) {
         // Not only when blocks are added: typing a pipe turns a prose line into
@@ -1183,6 +1186,14 @@ void Backend::saveWindowGeometry(int x, int y, int width, int height, bool maxim
     settings.setValue(QStringLiteral("window/fullScreen"), fullScreen);
 }
 
+// TextEdit makes scene graph nodes for the lines in view and no others, but only
+// of a text it thinks long, and it only thinks about it when its `text` is set.
+// Ours goes into the document underneath. Same threshold as Qt's own.
+void Backend::drawOnlyWhatShows(qsizetype length) {
+    if (m_editorItem)
+        m_editorItem->setFlag(QQuickItem::ItemObservesViewport, length > 10000);
+}
+
 void Backend::loadDocumentText(const QString &text) {
     if (!m_document) {
         setStatus(QStringLiteral("Could not attach the Markdown renderer."));
@@ -1190,6 +1201,7 @@ void Backend::loadDocumentText(const QString &text) {
     }
 
     m_loading = true;
+    drawOnlyWhatShows(text.size());
     // Nothing is revealed in a note that has just been opened, and every table
     // in it is drawn with its grid. Told before the text is set, so the one
     // highlight the setting does is the right one.
