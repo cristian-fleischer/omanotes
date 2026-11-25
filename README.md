@@ -4,10 +4,22 @@ A Markdown notes app for Linux: an editor that styles Markdown inline as you
 type, and a sidebar listing a folder of `.md` files. No GTK, no Chromium, no
 browser engine.
 
-Lean and quick on purpose. One 757 KB binary, nothing at runtime outside Qt 6,
-and a note on screen in a sixth of a second: 0.15 s for a short note and 0.16 s
-for a 62 KB one, wall clock from exec to the window. The numbers are measured,
-and there is a [table of them](#footprint) further down.
+It builds on [omawrite](https://github.com/omacom/omawrite) by David Heinemeier
+Hansson and adds a notes sidebar, tables, syntax highlighting, collapsible YAML
+headers and drafts per note, while being a third smaller, using less memory and
+starting faster:
+
+| | Omanotes | omawrite 0.7.8 |
+| --- | --- | --- |
+| Binary | 769 KB | 1,224 KB |
+| Short note on screen | 0.12 s | 0.16 s |
+| 62 KB note on screen | 0.15 s | 0.20 s |
+| Memory, 62 KB note | 108 MB | 120 MB |
+
+[How it is measured](#footprint) is further down, and what omawrite has that this
+does not: it speaks 49 languages, Omanotes only English. Nothing at runtime
+outside Qt 6. That makes it a quick viewer for any `.md` file too: `omanotes file.md`, or a
+double-click once it is the default.
 
 The buffer always holds your exact Markdown. Styling is applied over the source,
 never a conversion, and saving writes the bytes you see back unchanged.
@@ -18,20 +30,19 @@ box-drawing diagram](docs/omanotes.png)
 That note is `contrib/showcase.md`. Open it to see what the editor draws over
 plain Markdown.
 
-Based on [omawrite](https://github.com/omacom/omawrite) by David Heinemeier
-Hansson, MIT. The editing surface, autosave, atomic writes, crash recovery,
-portal dialogs and theme following all come from there. What Omanotes adds is
-the vault sidebar, the inline Markdown styling, syntax highlighting, tables,
-per-note drafts and the typography knobs described below.
+From omawrite, MIT: the editing surface, atomic writes, crash recovery, portal
+dialogs and following the desktop's palette, dark mode and text size. What
+Omanotes adds:
 
 - Markdown styled inline over the source: headings, bold, italic, strike,
   links, rules, bullets, checkboxes, code blocks and tables
 - Syntax highlighting inside fenced blocks, from a statically linked Lexilla
 - A vault sidebar: folder tree, filter, and content search through ripgrep
 - Per-note drafts that survive switching notes, closing the window and a crash
+- YAML headers that collapse to one row
+- A source view of the note as written
 - Tables drawn aligned however they were typed, with cells that carry their
   own bold, italic, links and code spans; the bytes are padded only on request
-- Follows the desktop palette, dark mode and text size
 - Zoom, column width, fonts and line heights all in a plain INI file
 
 ## Install
@@ -235,16 +246,18 @@ double-click gets once `xdg-mime default omanotes.desktop text/markdown` is set.
 - `Ctrl+N` opens a new Omanotes window.
 - `Ctrl+Z`, `Ctrl+Shift+Z`, and `Ctrl+Y` handle undo and redo.
 - `Super+F` toggles fullscreen. Qt maps this key as `Meta+F`.
-- `Ctrl+F` searches the document. Use `Enter` or `Ctrl+G` for the next match and `Shift+Enter` for the previous match.
+- `Ctrl+F` searches the document. Use `Enter` or `Ctrl+G` for the next match and `Shift+Enter` for the previous match, from wherever the caret is. The bar can stay open while you edit: the matches follow the text.
 - `Ctrl+H` opens find and replace.
 - `Ctrl+B`, `Ctrl+I`, and `Ctrl+K` insert bold, italic, and link Markdown.
 - `Ctrl+?` shows the keyboard shortcut reference.
 
-Nothing ever asks you about unsaved text. Closing the window keeps it; switching
+Unsaved text is kept without asking. Closing the window keeps it; switching
 to another note keeps it under the note it belongs to and gives it back when you
 return. Every note holding a draft carries a dot in the sidebar until it is
 saved, and the file on disk is untouched throughout. The same snapshot covers a
-crash.
+crash. A draft remembers which version of its file it was written against: if
+the file has been written by something else since, opening the note asks whether
+to keep your text or take the file. A note you only looked at is never a draft.
 
 Omanotes watches the open file and warns before an external change can replace
 local work.
@@ -321,22 +334,25 @@ there, and the zoom multiplies on top.
 ## Footprint
 
 Measured on Arch with Qt 6.12, Hyprland, an AMD iGPU and the performance power
-profile, against upstream omawrite 0.7.2 on the same machine and the same files.
-Startup is wall-clock from exec to the window on screen, the median of twenty
+profile, against upstream omawrite 0.7.8 on the same machine and the same files.
+Startup is wall-clock from exec to the window on screen, the median of fifteen
 shuffled runs. Memory is four seconds after that.
 
 | | Omanotes | omawrite |
 | --- | --- | --- |
-| Binary | 757 KB | 965 KB |
-| Installed package | 764 KB | 972 KB |
-| Download | 451 KB | 353 KB |
-| Window on screen, short note | 0.15 s | 0.18 s |
-| Window on screen, 62 KB note | 0.16 s | 0.22 s |
-| PSS, short note idle | 100 MB | 115 MB |
-| PSS, 62 KB note idle | 109 MB | 146 MB |
+| Binary | 769 KB | 1,224 KB |
+| Installed package | 777 KB | 1,237 KB |
+| Download | 457 KB | 452 KB |
+| Window on screen, short note | 0.12 s | 0.16 s |
+| Window on screen, 62 KB note | 0.15 s | 0.20 s |
+| PSS, short note idle | 99 MB | 114 MB |
+| PSS, 62 KB note idle | 108 MB | 120 MB |
 
-An empty Qt Quick window with the same style takes 0.11 s here, so most of what
-is left is Qt, the platform theme and the graphics driver. What keeps the rest
+Up to 183 KB of omawrite's binary are its translations, in 49 languages. Omanotes
+is in English only.
+
+An empty Qt Quick window with the same style takes about 0.1 s here, so most of
+what is left is Qt, the platform theme and the graphics driver. What keeps the rest
 small:
 
 - The driver is opened on a thread of its own while the interface is read.
