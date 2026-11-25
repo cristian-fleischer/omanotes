@@ -11,6 +11,7 @@
 #include <QRegularExpression>
 #include <QSyntaxHighlighter>
 #include <QTextCharFormat>
+#include <QTextCursor>
 
 class MarkdownHighlighter : public QSyntaxHighlighter {
     Q_OBJECT
@@ -255,7 +256,8 @@ private:
     int m_revealedFirst = -1;
     int m_revealedLast = -1;
     QString m_searchQuery;
-    int m_currentMatchStart = -1;
+    // A cursor, so that it stays on the match while the text around it changes.
+    QTextCursor m_currentMatch;
     QTextCharFormat m_searchFormat;
     QTextCharFormat m_currentSearchFormat;
 };

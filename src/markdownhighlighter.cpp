@@ -463,11 +463,27 @@ void MarkdownHighlighter::setPlain(bool plain) {
 }
 
 void MarkdownHighlighter::setSearch(const QString &query, int currentMatchStart) {
-    if (m_searchQuery == query && m_currentMatchStart == currentMatchStart)
+    const int previousStart = m_currentMatch.isNull() ? -1 : m_currentMatch.position();
+    if (m_searchQuery == query && previousStart == currentMatchStart)
         return;
+    const bool sameQuery = m_searchQuery == query;
+    const QTextBlock previous = m_currentMatch.block();
     m_searchQuery = query;
-    m_currentMatchStart = currentMatchStart;
-    rehighlight();
+    m_currentMatch = QTextCursor();
+    if (document() && currentMatchStart >= 0) {
+        m_currentMatch = QTextCursor(document());
+        m_currentMatch.setPosition(qMin(currentMatchStart, document()->characterCount() - 1));
+    }
+    if (!sameQuery) {
+        rehighlight();
+        return;
+    }
+    // Another match of the same query: only the lines the two are on differ.
+    const QTextBlock current = m_currentMatch.block();
+    if (previous.isValid())
+        rehighlightBlock(previous);
+    if (current.isValid() && current != previous)
+        rehighlightBlock(current);
 }
 
 void MarkdownHighlighter::rebuildFormats() {
@@ -1136,11 +1152,12 @@ void MarkdownHighlighter::highlightSearch(const QString &text) {
     if (m_searchQuery.isEmpty())
         return;
 
+    const int currentStart = m_currentMatch.isNull() ? -1 : m_currentMatch.position();
     int from = 0;
     while ((from = text.indexOf(m_searchQuery, from, Qt::CaseInsensitive)) >= 0) {
         const int documentStart = currentBlock().position() + from;
         QTextCharFormat format = this->format(from);
-        format.setBackground(documentStart == m_currentMatchStart
+        format.setBackground(documentStart == currentStart
                                  ? m_currentSearchFormat.background()
                                  : m_searchFormat.background());
         setFormat(from, m_searchQuery.length(), format);

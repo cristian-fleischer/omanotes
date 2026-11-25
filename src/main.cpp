@@ -8,6 +8,7 @@
 #include <QUrl>
 #include <QQuickWindow>
 #include <QFile>
+#include <QFileInfo>
 #include <QTimer>
 
 #ifdef __GLIBC__
@@ -78,10 +79,11 @@ int main(int argc, char *argv[]) {
     // left behind: open() stashes the restored draft under the note it belongs
     // to, so nothing is lost by moving off it. The interface is told before it
     // is built, because a window opened on one document lays itself out
-    // differently from one opened on a vault.
+    // differently from one opened on a vault. By its full path: drafts are kept
+    // by path, and `README.md` alone is a different note in every folder.
     const QStringList args = app.arguments();
     if (args.size() > 1)
-        backend.setStartupFile(args.at(1));
+        backend.setStartupFile(QFileInfo(args.at(1)).absoluteFilePath());
 
     // The root comes from settings, never from a path baked into the binary.
     // Scanning it is what a launch on the vault is for; with the sidebar away

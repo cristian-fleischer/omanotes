@@ -5,6 +5,7 @@
 #include <QClipboard>
 #include <QColor>
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -37,6 +38,7 @@
 #include <QWindow>
 
 #include <algorithm>
+#include <thread>
 
 #include "markdownhighlighter.h"
 
@@ -157,7 +159,10 @@ Backend::Backend(QObject *parent) : QObject(parent) {
     });
 }
 
-Backend::~Backend() = default;
+Backend::~Backend() {
+    if (m_cancelChecks)
+        *m_cancelChecks = true;
+}
 
 void Backend::setParentWindow(QWindow *window) {
     m_parentWindow = window;
@@ -266,18 +271,109 @@ QStringList Backend::draftPaths() const {
 }
 
 // Leaving a note keeps what was typed in it rather than asking about it.
+static QByteArray fingerprint(const QByteArray &contents) {
+    return QCryptographicHash::hash(contents, QCryptographicHash::Sha256);
+}
+
+// A note in a drafts folder is written as it is typed, so its file never has
+// anything else to say and nothing here applies to it.
+static bool isDraftNote(const QString &key) {
+    return VaultModel::isDraftPath(QUrl(key).toLocalFile());
+}
+
+bool Backend::readFile(const QString &path, QByteArray *contents) {
+    QFile file(path);
+    if (path.isEmpty() || !file.open(QIODevice::ReadOnly))
+        return false;
+    *contents = file.readAll();
+    return true;
+}
+
+bool Backend::dropDraft(const QString &key) {
+    m_draftBases.remove(key);
+    return m_drafts.remove(key) > 0;
+}
+
+void Backend::setKnownContents(const QByteArray &contents) {
+    m_lastKnownFileContents = contents;
+    m_hasKnownFileContents = true;
+    m_textBase = fingerprint(contents);
+}
+
+// The files are read on a thread of their own: one of them may be on a network
+// mount that does not answer, and no launch may wait for that. A thread that
+// hangs there is left behind, and touches nothing once it is cancelled.
+void Backend::dropSettledDrafts() {
+    if (m_drafts.value(QString()).isEmpty())
+        dropDraft(QString());
+
+    QHash<QString, QString> candidates;
+    for (auto it = m_drafts.constBegin(); it != m_drafts.constEnd(); ++it) {
+        if (!it.key().isEmpty() && !isDraftNote(it.key()))
+            candidates.insert(it.key(), it.value());
+    }
+    if (candidates.isEmpty())
+        return;
+
+    m_cancelChecks = std::make_shared<std::atomic_bool>(false);
+    std::thread([this, candidates, cancelled = m_cancelChecks] {
+        QStringList settled;
+        for (auto it = candidates.constBegin(); it != candidates.constEnd(); ++it) {
+            QByteArray contents;
+            LineEnding lineEnding;
+            bool byteOrderMark = false;
+            const bool read = readFile(QUrl(it.key()).toLocalFile(), &contents);
+            if (*cancelled)
+                return;
+            if (read && decodeFileContents(contents, &lineEnding, &byteOrderMark) == it.value())
+                settled.append(it.key());
+        }
+        if (settled.isEmpty())
+            return;
+        // Handed over to the application, which outlives this backend, and
+        // looked at there only if the backend is still around.
+        QMetaObject::invokeMethod(QCoreApplication::instance(), [this, settled, candidates,
+                                                                 cancelled] {
+            if (*cancelled)
+                return;
+            for (const QString &key : settled) {
+                // Edited again in the meantime, it is a draft after all.
+                if (m_drafts.value(key) == candidates.value(key))
+                    dropDraft(key);
+            }
+            scheduleRecovery();
+            emit draftsChanged();
+        }, Qt::QueuedConnection);
+    }).detach();
+}
+
 void Backend::stashDraft() {
     if (writeDraftFile())
         emit draftWritten();
 
     if (!m_modified || !m_document)
         return;
-    m_drafts.insert(draftKey(), currentDocumentText());
+    const QString key = draftKey();
+    const QString text = currentDocumentText();
+    LineEnding lineEnding;
+    bool byteOrderMark = false;
+    // Typed in and put back, or marked unsaved without a word of its own.
+    const bool settled = !isDraftNote(key) && m_hasKnownFileContents
+        && decodeFileContents(m_lastKnownFileContents, &lineEnding, &byteOrderMark) == text;
+    if (settled) {
+        dropDraft(key);
+    } else {
+        m_drafts.insert(key, text);
+        if (m_textBase.isEmpty())
+            m_draftBases.remove(key);
+        else
+            m_draftBases.insert(key, m_textBase);
+    }
     emit draftsChanged();
 }
 
 void Backend::discardDraftFor(const QUrl &url) {
-    if (m_drafts.remove(url.toString()) > 0) {
+    if (dropDraft(url.toString())) {
         writeRecovery();
         emit draftsChanged();
     }
@@ -304,12 +400,20 @@ void Backend::open(const QUrl &url) {
     const QString onDisk = decodeFileContents(contents, &m_lineEnding, &m_hasByteOrderMark);
 
     // A note left with unsaved text comes back with it, still unsaved.
-    const auto draft = m_drafts.constFind(url.toString());
-    const bool hadDraft = draft != m_drafts.constEnd();
-    loadDocumentText(hadDraft ? *draft : onDisk);
+    const QString key = url.toString();
+    if (!isDraftNote(key) && m_drafts.value(key) == onDisk)
+        dropDraft(key);
+    const bool hadDraft = m_drafts.contains(key);
+    // The file has moved on since the draft was written, or nobody knows what
+    // it was written against. Neither may hide the other, so it is asked.
+    const QByteArray base = m_draftBases.value(key);
+    const bool conflict = hadDraft && !isDraftNote(key) && base != fingerprint(contents);
+    loadDocumentText(hadDraft ? m_drafts.value(key) : onDisk);
 
-    m_lastKnownFileContents = contents;
-    m_hasKnownFileContents = true;
+    setKnownContents(contents);
+    // Still unsettled if it is left without an answer.
+    if (conflict)
+        m_textBase = base;
     setFileUrl(url);
     watchCurrentFile();
     setModified(hadDraft);
@@ -317,6 +421,17 @@ void Backend::open(const QUrl &url) {
                        : QStringLiteral("Opened %1").arg(fileName()));
     writeRecovery();
     emit draftsChanged();
+    if (conflict)
+        askAboutExternalChange();
+}
+
+// Once the window is there to ask in: a note can be opened before it is.
+void Backend::askAboutExternalChange() {
+    const QUrl url = m_fileUrl;
+    QMetaObject::invokeMethod(this, [this, url] {
+        if (m_fileUrl == url && m_modified)
+            emit externalChangeDetected(false, true);
+    }, Qt::QueuedConnection);
 }
 
 void Backend::save() {
@@ -367,10 +482,11 @@ void Backend::closeFile() {
     if (!watched.isEmpty())
         m_fileWatcher.removePaths(watched);
 
-    m_drafts.remove(m_fileUrl.toString());
+    dropDraft(m_fileUrl.toString());
     setFileUrl(QUrl());
     m_lastKnownFileContents.clear();
     m_hasKnownFileContents = false;
+    m_textBase.clear();
     loadDocumentText(QString());
     setModified(false);
     setStatus(QString());
@@ -387,7 +503,7 @@ void Backend::discardChanges() {
     // reopen: open() stashes a modified buffer on the way out and hands it
     // straight back on the way in, which is right everywhere else.
     setModified(false);
-    m_drafts.remove(url.toString());
+    dropDraft(url.toString());
     open(url);
     writeRecovery();
     emit draftsChanged();
@@ -398,13 +514,13 @@ void Backend::reloadFromDisk() {
 }
 
 void Backend::keepExternalVersion() {
-    QFile file(m_fileUrl.toLocalFile());
-    if (file.open(QIODevice::ReadOnly)) {
-        m_lastKnownFileContents = file.readAll();
-        m_hasKnownFileContents = true;
+    QByteArray contents;
+    if (readFile(m_fileUrl.toLocalFile(), &contents)) {
+        setKnownContents(contents);
     } else {
         m_lastKnownFileContents.clear();
         m_hasKnownFileContents = false;
+        m_textBase.clear();
     }
     setModified(true);
     scheduleRecovery();
@@ -1321,15 +1437,14 @@ void Backend::saveTo(const QUrl &url) {
     const bool shouldClose = m_closeAfterSave;
     m_closeAfterSave = false;
     const QUrl saved = namesItself ? renameToTitle(url, text) : url;
-    m_lastKnownFileContents = contents;
-    m_hasKnownFileContents = true;
+    setKnownContents(contents);
     setFileUrl(saved);
     watchCurrentFile();
     QSettings().setValue(lastSaveDirectorySetting,
                          QFileInfo(saved.toLocalFile()).absolutePath());
     setModified(false);
     setStatus(QStringLiteral("Saved %1").arg(fileName()));
-    m_drafts.remove(saved.toString());
+    dropDraft(saved.toString());
     writeRecovery();
     emit draftsChanged();
     emit saveSucceeded();
@@ -1364,13 +1479,22 @@ void Backend::writeRecovery() {
     QJsonObject drafts;
     for (auto it = m_drafts.constBegin(); it != m_drafts.constEnd(); ++it)
         drafts.insert(it.key(), it.value());
-    if (m_modified)
+    QJsonObject bases;
+    for (auto it = m_draftBases.constBegin(); it != m_draftBases.constEnd(); ++it)
+        bases.insert(it.key(), QString::fromLatin1(it.value().toHex()));
+    if (m_modified) {
         drafts.insert(draftKey(), currentDocumentText());
+        if (m_textBase.isEmpty())
+            bases.remove(draftKey());
+        else
+            bases.insert(draftKey(), QString::fromLatin1(m_textBase.toHex()));
+    }
 
     const QJsonObject recovery{
         {QStringLiteral("fileUrl"), m_fileUrl.toString()},
         {QStringLiteral("text"), currentDocumentText()},
         {QStringLiteral("drafts"), drafts},
+        {QStringLiteral("bases"), bases},
         {QStringLiteral("crlf"), m_lineEnding == LineEnding::CrLf},
         {QStringLiteral("bom"), m_hasByteOrderMark}};
     file.write(QJsonDocument(recovery).toJson(QJsonDocument::Compact));
@@ -1389,35 +1513,52 @@ void Backend::restoreRecovery() {
     for (auto it = drafts.constBegin(); it != drafts.constEnd(); ++it)
         m_drafts.insert(it.key(), it.value().toString());
 
-    m_lineEnding = recovery.value(QStringLiteral("crlf")).toBool() ? LineEnding::CrLf
-                                                                  : LineEnding::Lf;
-    m_hasByteOrderMark = recovery.value(QStringLiteral("bom")).toBool();
+    const QJsonObject bases = recovery.value(QStringLiteral("bases")).toObject();
+    for (auto it = bases.constBegin(); it != bases.constEnd(); ++it)
+        m_draftBases.insert(it.key(), QByteArray::fromHex(it.value().toString().toLatin1()));
     const QUrl url(recovery.value(QStringLiteral("fileUrl")).toString());
+    const QString key = url.isValid() ? url.toString() : QString();
+    // Snapshots from before there were drafts hold nothing but the one text.
+    if (!recovery.contains(QStringLiteral("drafts")))
+        m_drafts.insert(key, recovery.value(QStringLiteral("text")).toString());
+    dropSettledDrafts();
+
     // About to be replaced by the file the app was started with, which would
-    // put it away under its note. Put it there without showing it first: laying
-    // out a long note takes longer than everything else a launch does.
+    // put it away under its note. Leave it there without showing it first:
+    // laying out a long note takes longer than everything else a launch does.
     if (startedWithFile() && QFileInfo(m_startupFile).isFile()
             && QFileInfo(m_startupFile).isReadable()) {
-        // Already among the drafts, if it had unsaved text. Snapshots from
-        // before there were drafts hold nothing but the one text.
-        if (!recovery.contains(QStringLiteral("drafts"))) {
-            m_drafts.insert(url.isValid() ? url.toString() : QString(),
-                            recovery.value(QStringLiteral("text")).toString());
-        }
         emit draftsChanged();
         return;
     }
-    loadDocumentText(recovery.value(QStringLiteral("text")).toString());
-    const QUrl recoveredUrl(recovery.value(QStringLiteral("fileUrl")).toString());
-    QFile diskFile(recoveredUrl.toLocalFile());
-    if (recoveredUrl.isLocalFile() && diskFile.open(QIODevice::ReadOnly)) {
-        m_lastKnownFileContents = diskFile.readAll();
-        m_hasKnownFileContents = true;
-    } else {
-        m_lastKnownFileContents.clear();
-        m_hasKnownFileContents = false;
+
+    // The note that was open comes back. If it had no unsaved text it comes back
+    // from the disk, and as saved as it was: marking it unsaved made a draft of
+    // every note a window was ever closed on, and that draft then stood in front
+    // of whatever was written to the file later.
+    if (url.isLocalFile() && QFileInfo(url.toLocalFile()).isReadable()) {
+        open(url);
+        if (m_modified)
+            setStatus(QStringLiteral("Unsaved draft restored"));
+        return;
     }
-    setFileUrl(recoveredUrl);
+    if (!m_drafts.contains(key)) {
+        // Nothing unsaved and no file to read again: what it held is all there
+        // is of it, unless it held nothing.
+        if (recovery.value(QStringLiteral("text")).toString().isEmpty()) {
+            emit draftsChanged();
+            return;
+        }
+        m_drafts.insert(key, recovery.value(QStringLiteral("text")).toString());
+    }
+    m_lineEnding = recovery.value(QStringLiteral("crlf")).toBool() ? LineEnding::CrLf
+                                                                  : LineEnding::Lf;
+    m_hasByteOrderMark = recovery.value(QStringLiteral("bom")).toBool();
+    loadDocumentText(m_drafts.value(key));
+    m_lastKnownFileContents.clear();
+    m_hasKnownFileContents = false;
+    m_textBase = m_draftBases.value(key);
+    setFileUrl(url);
     setModified(true);
     setStatus(QStringLiteral("Unsaved draft restored"));
     emit draftsChanged();
@@ -1426,6 +1567,7 @@ void Backend::restoreRecovery() {
 void Backend::clearRecovery() {
     m_recoveryTimer.stop();
     m_drafts.clear();
+    m_draftBases.clear();
     QFile::remove(recoveryPath());
     emit draftsChanged();
 }
@@ -1723,8 +1865,7 @@ bool Backend::writeDraftFile() {
         watchCurrentFile();
         return false;
     }
-    m_lastKnownFileContents = contents;
-    m_hasKnownFileContents = true;
+    setKnownContents(contents);
     watchCurrentFile();
     return true;
 }
@@ -1771,7 +1912,7 @@ QUrl Backend::renameToTitle(const QUrl &url, const QString &text) {
     if (!QFile::rename(info.absoluteFilePath(), directory.filePath(name)))
         return url;
 
-    m_drafts.remove(url.toString());
+    dropDraft(url.toString());
     return QUrl::fromLocalFile(directory.filePath(name));
 }
 

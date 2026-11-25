@@ -45,7 +45,14 @@ ApplicationWindow {
                                         - Math.round(writerFontMetrics.averageCharacterWidth * 20)))),
         editorAreaWidth)
     property bool searchOpen: false
-    onSearchOpenChanged: if (win.searchOpen) searchBar.active = true
+    onSearchOpenChanged: {
+        if (!win.searchOpen)
+            return;
+        searchBar.active = true;
+        // Opened again with a query still in it, on a text that may have moved.
+        if (win.searchField.text.length > 0)
+            win.refreshSearch();
+    }
     readonly property var searchField: searchBar.item ? searchBar.item.field : null
     property bool searchUpdating: false
     property var searchMatches: []
@@ -352,7 +359,7 @@ ApplicationWindow {
             : Window.FullScreen;
     }
 
-    function updateSearch() {
+    function findMatches() {
         var matches = [];
         var query = win.searchField.text;
         if (query.length > 0) {
@@ -364,9 +371,32 @@ ApplicationWindow {
                 position += Math.max(1, needle.length);
             }
         }
-        searchMatches = matches;
-        searchMatchIndex = matches.length > 0 ? 0 : -1;
+        return matches;
+    }
+
+    // The first match from a position on, selected. For a query being typed and
+    // for a match that has just been replaced.
+    function updateSearch(from) {
+        searchMatches = findMatches();
+        searchMatchIndex = searchMatches.length > 0 ? 0 : -1;
+        for (var i = 0; from !== undefined && i < searchMatches.length; ++i) {
+            if (searchMatches[i] >= from) {
+                searchMatchIndex = i;
+                break;
+            }
+        }
         showSearchMatch();
+    }
+
+    // The matches of a text that has changed under the search bar. Nothing is
+    // selected and the caret stays put: this runs on every keystroke in the
+    // editor, and the next one would type over a match it had selected.
+    function refreshSearch() {
+        searchMatches = findMatches();
+        searchMatchIndex = -1;
+        searchUpdating = true;
+        backend.setSearchHighlight(win.searchField.text, -1);
+        searchUpdating = false;
     }
 
     function showSearchMatch() {
@@ -381,11 +411,47 @@ ApplicationWindow {
     }
 
     function moveSearch(direction) {
-        if (searchMatches.length === 0)
+        var count = searchMatches.length;
+        if (count === 0)
             return;
-        searchMatchIndex = (searchMatchIndex + direction + searchMatches.length)
-                           % searchMatches.length;
+        var length = win.searchField.text.length;
+        var onMatch = searchMatchIndex >= 0
+            && editor.selectionStart === searchMatches[searchMatchIndex]
+            && editor.selectionEnd === searchMatches[searchMatchIndex] + length;
+        if (onMatch) {
+            searchMatchIndex = (searchMatchIndex + direction + count) % count;
+        } else {
+            // The caret has been put somewhere since: go on from there.
+            var caret = editor.cursorPosition;
+            var next = 0;
+            while (next < count && searchMatches[next] < caret)
+                ++next;
+            searchMatchIndex = direction > 0 ? next % count : (next - 1 + count) % count;
+        }
         showSearchMatch();
+    }
+
+    function replaceCurrent(replacement) {
+        // No match picked, as after an edit: the first press finds one.
+        if (searchMatchIndex < 0) {
+            moveSearch(1);
+            return;
+        }
+        var start = searchMatches[searchMatchIndex];
+        EditorMutations.replaceRange(editor, start, start + win.searchField.text.length,
+                                     replacement);
+        updateSearch(start + replacement.length);
+    }
+
+    function replaceAll(replacement) {
+        var length = win.searchField.text.length;
+        if (length === 0)
+            return;
+        // From the end, so the ones before stay where they are.
+        var matches = findMatches();
+        for (var i = matches.length - 1; i >= 0; --i)
+            EditorMutations.replaceRange(editor, matches[i], matches[i] + length, replacement);
+        updateSearch();
     }
 
     function closeSearch() {
@@ -603,6 +669,8 @@ ApplicationWindow {
             editor.cursorPosition = start;
             editor.lastCursorPosition = editor.cursorPosition;
             editorFlick.contentY = 0;
+            if (win.searchOpen)
+                win.refreshSearch();
         }
 
         function onDraftsChanged() {
@@ -1573,7 +1641,7 @@ ApplicationWindow {
                             return;
                         var contentChanged = backend.editorTextChanged();
                         if (win.searchOpen && contentChanged)
-                            win.updateSearch();
+                            win.refreshSearch();
                     }
 
                     Text {
@@ -1831,6 +1899,8 @@ ApplicationWindow {
                             verticalAlignment: Text.AlignVCenter
                             text: win.searchMatches.length === 0
                                 ? "0/0"
+                                : win.searchMatchIndex < 0
+                                ? String(win.searchMatches.length)
                                 : (win.searchMatchIndex + 1) + "/" + win.searchMatches.length
                             color: win.darkMode ? win.textColor : "#62635f"
                             font.pixelSize: win.scaledSize(16)
@@ -1840,29 +1910,13 @@ ApplicationWindow {
                             id: replaceCurrentButton
                             visible: win.replaceOpen
                             text: "Replace"
-                            onClicked: {
-                                if (win.searchMatchIndex < 0) return;
-                                var start = win.searchMatches[win.searchMatchIndex];
-                                EditorMutations.replaceRange(editor, start,
-                                                             start + searchField.text.length,
-                                                             replaceField.text);
-                                win.updateSearch();
-                            }
+                            onClicked: win.replaceCurrent(replaceField.text)
                         }
 
                         Button {
                             visible: win.replaceOpen
                             text: "All"
-                            onClicked: {
-                                if (searchField.text.length === 0) return;
-                                for (var i = win.searchMatches.length - 1; i >= 0; --i) {
-                                    var start = win.searchMatches[i];
-                                    EditorMutations.replaceRange(editor, start,
-                                                                 start + searchField.text.length,
-                                                                 replaceField.text);
-                                }
-                                win.updateSearch();
-                            }
+                            onClicked: win.replaceAll(replaceField.text)
                         }
 
                         Rectangle {

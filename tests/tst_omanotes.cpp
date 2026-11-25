@@ -1,5 +1,7 @@
 #include <QQuickItem>
 #include <QQuickWindow>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QtTest>
 #include <QAbstractTextDocumentLayout>
 #include <QFont>
@@ -1296,6 +1298,236 @@ private slots:
             backend.discardRecovery();
         }
 
+        clearRecoverySnapshots();
+    }
+
+    // Every launch used to mark whatever it restored as unsaved, so a note that
+    // was only ever looked at became a draft, and from then on its old text
+    // stood in front of the file.
+    void aNoteThatWasOnlyReadIsNotADraft() {
+        clearRecoverySnapshots();
+        QTemporaryDir directory;
+        const QString readPath = directory.filePath(QStringLiteral("read.md"));
+        const QString editedPath = directory.filePath(QStringLiteral("edited.md"));
+        const auto write = [](const QString &path, const QByteArray &bytes) {
+            QFile file(path);
+            return file.open(QIODevice::WriteOnly) && file.write(bytes) == bytes.size();
+        };
+        QVERIFY(write(readPath, "read\n"));
+        QVERIFY(write(editedPath, "edited\n"));
+        const QUrl readUrl = QUrl::fromLocalFile(readPath);
+        const QUrl editedUrl = QUrl::fromLocalFile(editedPath);
+
+        {
+            QQmlEngine engine;
+            QScopedPointer<QObject> editor(createEditor(&engine));
+            Backend backend;
+            backend.attachDocument(editor->property("textDocument").value<QObject *>());
+            backend.open(editedUrl);
+            QVERIFY(QMetaObject::invokeMethod(editor.data(), "insert", Q_ARG(int, 0),
+                                              Q_ARG(QString, QStringLiteral("draft "))));
+            backend.editorTextChanged();
+            backend.open(readUrl);
+            QCOMPARE(backend.draftPaths(), QStringList{editedPath});
+            backend.persistDraft();
+        }
+
+        // Somebody else writes the note that was open but not edited.
+        QVERIFY(write(readPath, "read again\n"));
+        for (int launch = 0; launch < 2; ++launch) {
+            QQmlEngine engine;
+            QScopedPointer<QObject> editor(createEditor(&engine));
+            Backend backend;
+            QSignalSpy changed(&backend, &Backend::externalChangeDetected);
+            backend.attachDocument(editor->property("textDocument").value<QObject *>());
+            QCOMPARE(backend.fileUrl(), readUrl);
+            QCOMPARE(editor->property("text").toString(), QStringLiteral("read again\n"));
+            QVERIFY(!backend.modified());
+            QCOMPARE(backend.draftPaths(), QStringList{editedPath});
+            QCoreApplication::processEvents();
+            QCOMPARE(changed.count(), 0);
+            // Looked at and left, typed in and put back: neither is a draft.
+            QVERIFY(QMetaObject::invokeMethod(editor.data(), "insert", Q_ARG(int, 0),
+                                              Q_ARG(QString, QStringLiteral("x"))));
+            backend.editorTextChanged();
+            QVERIFY(QMetaObject::invokeMethod(editor.data(), "remove", Q_ARG(int, 0), Q_ARG(int, 1)));
+            backend.editorTextChanged();
+            backend.open(editedUrl);
+            QVERIFY(backend.modified());
+            QCOMPARE(editor->property("text").toString(), QStringLiteral("draft edited\n"));
+            QCOMPARE(backend.draftPaths(), QStringList{editedPath});
+            backend.open(readUrl);
+            backend.persistDraft();
+        }
+        clearRecoverySnapshots();
+    }
+
+    // A draft and a file that has moved on since: neither may hide the other.
+    void asksAboutADraftWhoseFileHasChanged() {
+        clearRecoverySnapshots();
+        QTemporaryDir directory;
+        const QString path = directory.filePath(QStringLiteral("note.md"));
+        const QString otherPath = directory.filePath(QStringLiteral("other.md"));
+        const auto write = [](const QString &file, const QByteArray &bytes) {
+            QFile out(file);
+            return out.open(QIODevice::WriteOnly) && out.write(bytes) == bytes.size();
+        };
+        QVERIFY(write(path, "one\n"));
+        QVERIFY(write(otherPath, "other\n"));
+        const QUrl url = QUrl::fromLocalFile(path);
+        const QUrl other = QUrl::fromLocalFile(otherPath);
+
+        {
+            QQmlEngine engine;
+            QScopedPointer<QObject> editor(createEditor(&engine));
+            Backend backend;
+            QSignalSpy changed(&backend, &Backend::externalChangeDetected);
+            backend.attachDocument(editor->property("textDocument").value<QObject *>());
+            backend.open(url);
+            QVERIFY(QMetaObject::invokeMethod(editor.data(), "insert", Q_ARG(int, 0),
+                                              Q_ARG(QString, QStringLiteral("mine "))));
+            backend.editorTextChanged();
+            backend.open(other);
+
+            // Nothing happened to the file: the draft comes back, no question.
+            backend.open(url);
+            QCoreApplication::processEvents();
+            QCOMPARE(changed.count(), 0);
+            QCOMPARE(editor->property("text").toString(), QStringLiteral("mine one\n"));
+            backend.open(other);
+
+            QVERIFY(write(path, "two\n"));
+            backend.open(url);
+            QCoreApplication::processEvents();
+            QCOMPARE(changed.count(), 1);
+            QCOMPARE(editor->property("text").toString(), QStringLiteral("mine one\n"));
+            QVERIFY(backend.modified());
+            // Left without an answer, it is asked again, after a restart too.
+            backend.open(other);
+            backend.open(url);
+            QCoreApplication::processEvents();
+            QCOMPARE(changed.count(), 2);
+            backend.persistDraft();
+        }
+        {
+            QQmlEngine engine;
+            QScopedPointer<QObject> editor(createEditor(&engine));
+            Backend backend;
+            QSignalSpy changed(&backend, &Backend::externalChangeDetected);
+            backend.attachDocument(editor->property("textDocument").value<QObject *>());
+            QCoreApplication::processEvents();
+            QCOMPARE(changed.count(), 1);
+            QCOMPARE(editor->property("text").toString(), QStringLiteral("mine one\n"));
+            // Keeping it settles the question for this version of the file.
+            backend.keepExternalVersion();
+            backend.open(other);
+            backend.open(url);
+            QCoreApplication::processEvents();
+            QCOMPARE(changed.count(), 1);
+            QCOMPARE(editor->property("text").toString(), QStringLiteral("mine one\n"));
+            backend.open(other);
+
+            // Reloading takes the file and drops the draft.
+            QVERIFY(write(path, "three\n"));
+            backend.open(url);
+            QCoreApplication::processEvents();
+            QCOMPARE(changed.count(), 2);
+            backend.reloadFromDisk();
+            QCOMPARE(editor->property("text").toString(), QStringLiteral("three\n"));
+            QVERIFY(!backend.modified());
+            QVERIFY(backend.draftPaths().isEmpty());
+        }
+        clearRecoverySnapshots();
+    }
+
+    // Asked in the window, at launch as well, where the note is opened before
+    // the window has been seen.
+    void theQuestionIsPutInTheWindow() {
+        clearRecoverySnapshots();
+        QTemporaryDir directory;
+        const QString path = directory.filePath(QStringLiteral("note.md"));
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("on disk\n");
+        file.close();
+        const QString key = QUrl::fromLocalFile(path).toString();
+        const QString state = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+        QVERIFY(QDir().mkpath(state));
+        QFile snapshot(QDir(state).filePath(QStringLiteral("recovery-0.json")));
+        QVERIFY(snapshot.open(QIODevice::WriteOnly));
+        snapshot.write(QJsonDocument(QJsonObject{
+            {QStringLiteral("fileUrl"), key},
+            {QStringLiteral("text"), QStringLiteral("mine\n")},
+            {QStringLiteral("drafts"), QJsonObject{{key, QStringLiteral("mine\n")}}}}).toJson());
+        snapshot.close();
+
+        Backend backend;
+        VaultModel vault;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        engine.rootContext()->setContextProperty(QStringLiteral("vault"), &vault);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(QFINDTESTDATA("../src/Main.qml")));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("mine\n"));
+        QTRY_VERIFY(window->findChild<QObject *>(QStringLiteral("externalChangeDialog")));
+        QObject *dialog = window->findChild<QObject *>(QStringLiteral("externalChangeDialog"));
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QVERIFY(QMetaObject::invokeMethod(dialog, "reloadRequested"));
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("on disk\n"));
+        QVERIFY(!backend.modified());
+        clearRecoverySnapshots();
+    }
+
+    // Snapshots from before a draft knew which file it was written against.
+    void sortsOutOldDrafts() {
+        clearRecoverySnapshots();
+        QTemporaryDir directory;
+        const auto path = [&directory](const char *name) {
+            return directory.filePath(QLatin1String(name));
+        };
+        for (const char *name : {"same.md", "crlf.md", "differs.md"}) {
+            QFile file(path(name));
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            file.write(name[0] == 'c' ? "a\r\nb\r\n" : "a\nb\n");
+        }
+        const auto key = [&path](const char *name) {
+            return QUrl::fromLocalFile(path(name)).toString();
+        };
+        const QJsonObject drafts{{key("same.md"), QStringLiteral("a\nb\n")},
+                                 {key("crlf.md"), QStringLiteral("a\nb\n")},
+                                 {key("differs.md"), QStringLiteral("a\nmine\n")},
+                                 {key("gone.md"), QStringLiteral("only copy\n")},
+                                 {QString(), QString()}};
+        const QString state = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+        QVERIFY(QDir().mkpath(state));
+        QFile snapshot(QDir(state).filePath(QStringLiteral("recovery-0.json")));
+        QVERIFY(snapshot.open(QIODevice::WriteOnly));
+        snapshot.write(QJsonDocument(QJsonObject{{QStringLiteral("fileUrl"), key("same.md")},
+                                                 {QStringLiteral("text"), QStringLiteral("a\nb\n")},
+                                                 {QStringLiteral("drafts"), drafts}}).toJson());
+        snapshot.close();
+
+        QQmlEngine engine;
+        QScopedPointer<QObject> editor(createEditor(&engine));
+        Backend backend;
+        QSignalSpy changed(&backend, &Backend::externalChangeDetected);
+        backend.attachDocument(editor->property("textDocument").value<QObject *>());
+        QCOMPARE(backend.fileUrl(), QUrl::fromLocalFile(path("same.md")));
+        QVERIFY(!backend.modified());
+        const auto left = [&backend] {
+            QStringList paths = backend.draftPaths();
+            paths.sort();
+            return paths;
+        };
+        QTRY_COMPARE(left(), (QStringList{path("differs.md"), path("gone.md")}));
+
+        // Written against who knows what, so it is asked about.
+        backend.open(QUrl::fromLocalFile(path("differs.md")));
+        QCoreApplication::processEvents();
+        QCOMPARE(changed.count(), 1);
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("a\nmine\n"));
         clearRecoverySnapshots();
     }
 
@@ -3572,6 +3804,118 @@ private slots:
         QVERIFY(!document->isUndoAvailable());
         QVERIFY(document->isUndoRedoEnabled());
         QVERIFY(!backend.modified());
+    }
+
+    // With the search bar open every edit went looking for the first match,
+    // selected it, and the next keystroke typed over it.
+    void editsWhereTheCaretIsWhileSearching() {
+        QTemporaryDir directory;
+        const QString path = directory.filePath(QStringLiteral("note.md"));
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("word one\n\nplain line\n\nword two\n\nword three\n");
+        file.close();
+
+        Backend backend;
+        VaultModel vault;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        engine.rootContext()->setContextProperty(QStringLiteral("vault"), &vault);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(QFINDTESTDATA("../src/Main.qml")));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+        auto *quickWindow = qobject_cast<QQuickWindow *>(window.data());
+        auto *editor = window->findChild<QQuickItem *>(QStringLiteral("sourceEditor"));
+        QVERIFY(quickWindow && editor);
+        backend.open(QUrl::fromLocalFile(path));
+        const auto text = [editor] { return editor->property("text").toString(); };
+        const auto caret = [editor] { return editor->property("cursorPosition").toInt(); };
+        const auto selected = [editor] { return editor->property("selectedText").toString(); };
+        const auto type = [quickWindow](const char *keys) {
+            for (; *keys; ++keys)
+                QTest::keyClick(quickWindow, *keys);
+        };
+
+        window->setProperty("searchOpen", true);
+        auto *field = window->property("searchField").value<QObject *>();
+        QVERIFY(field);
+        field->setProperty("text", QStringLiteral("word"));
+        QCOMPARE(window->property("searchMatches").toList().size(), 3);
+        QCOMPARE(selected(), QStringLiteral("word"));
+        QCOMPARE(caret(), 4);
+
+        // Into the plain line, and type.
+        QVERIFY(QMetaObject::invokeMethod(editor, "forceActiveFocus"));
+        editor->setProperty("cursorPosition", 15);
+        type("abc");
+        QCOMPARE(text(), QStringLiteral("word one\n\nplainabc line\n\nword two\n\nword three\n"));
+        QCOMPARE(caret(), 18);
+        QCOMPARE(selected(), QString());
+        QTest::keyClick(quickWindow, Qt::Key_Backspace);
+        QCOMPARE(text(), QStringLiteral("word one\n\nplainab line\n\nword two\n\nword three\n"));
+        QCOMPARE(caret(), 17);
+        QTest::keyClick(quickWindow, Qt::Key_Return);
+        QCOMPARE(caret(), 19);
+        QVERIFY(QMetaObject::invokeMethod(editor, "undo"));
+        QCOMPARE(selected(), QString());
+
+        // The matches follow the text, a new one included.
+        editor->setProperty("cursorPosition", 10);
+        type("word ");
+        QCOMPARE(window->property("searchMatches").toList().size(), 4);
+        QCOMPARE(caret(), 15);
+
+        // The next match is the next one from where the caret is.
+        const int next = text().indexOf(QStringLiteral("word two"));
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "moveSearch", Q_ARG(QVariant, 1)));
+        QCOMPARE(editor->property("selectionStart").toInt(), next);
+        QCOMPARE(window->property("searchMatchIndex").toInt(), 2);
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "moveSearch", Q_ARG(QVariant, 1)));
+        QCOMPARE(window->property("searchMatchIndex").toInt(), 3);
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "moveSearch", Q_ARG(QVariant, 1)));
+        QCOMPARE(window->property("searchMatchIndex").toInt(), 0);
+        editor->setProperty("cursorPosition", next);
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "moveSearch", Q_ARG(QVariant, -1)));
+        QCOMPARE(window->property("searchMatchIndex").toInt(), 1);
+
+        // Closed, edited and opened again, the matches are where the text is now.
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "closeSearch"));
+        QVERIFY(QMetaObject::invokeMethod(editor, "insert", Q_ARG(int, 0),
+                                          Q_ARG(QString, QStringLiteral("first "))));
+        editor->setProperty("cursorPosition", 0);
+        window->setProperty("searchOpen", true);
+        QCOMPARE(window->property("searchMatches").toList().constFirst().toInt(), 6);
+        QCOMPARE(selected(), QString());
+        QCOMPARE(caret(), 0);
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "closeSearch"));
+
+        // Replacing goes on to the match after the one it replaced.
+        window->setProperty("searchOpen", true);
+        window->setProperty("replaceOpen", true);
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "moveSearch", Q_ARG(QVariant, 1)));
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "moveSearch", Q_ARG(QVariant, 1)));
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "replaceCurrent",
+                                          Q_ARG(QVariant, QStringLiteral("new word"))));
+        QCOMPARE(text(), QStringLiteral("first word one\n\nnew word plainab line\n\n"
+                                        "word two\n\nword three\n"));
+        QCOMPARE(editor->property("selectionStart").toInt(), text().indexOf(QStringLiteral("word two")));
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "replaceAll",
+                                          Q_ARG(QVariant, QStringLiteral("wordy"))));
+        QCOMPARE(text(), QStringLiteral("first wordy one\n\nnew wordy plainab line\n\n"
+                                        "wordy two\n\nwordy three\n"));
+
+        // Another note has matches of its own.
+        const QString otherPath = directory.filePath(QStringLiteral("other.md"));
+        QFile other(otherPath);
+        QVERIFY(other.open(QIODevice::WriteOnly));
+        other.write("a word\n");
+        other.close();
+        backend.open(QUrl::fromLocalFile(otherPath));
+        QCOMPARE(window->property("searchMatches").toList().size(), 1);
+        QCOMPARE(window->property("searchMatches").toList().constFirst().toInt(), 2);
+        QCOMPARE(selected(), QString());
+        backend.discardRecovery();
+        backend.closeFile();
     }
 
     void scalesTextWithDesktopTextSize() {

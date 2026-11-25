@@ -12,6 +12,7 @@
 #include <QTimer>
 #include <QUrl>
 #include <QVariantList>
+#include <atomic>
 #include <memory>
 
 class MarkdownHighlighter;
@@ -283,6 +284,7 @@ private:
     QPair<qreal, qreal> verticalMarginsFor(const QTextBlock &block, BlockKind kind) const;
     bool hasWantedTypography(const QTextBlock &block, BlockKind kind) const;
     void applyBlockTypography(QTextCursor &cursor, const QTextBlock &block, BlockKind kind);
+    void askAboutExternalChange();
     void scheduleRecovery();
     void writeRecovery();
     void stashDraft();
@@ -336,6 +338,19 @@ private:
     // Unsaved text per file, so switching notes never asks and never loses
     // anything. Keyed by file URL; the empty key is the untitled buffer.
     QHash<QString, QString> m_drafts;
+    // What each draft's file held when the draft was written against it. None
+    // for a draft from before this was kept, or of no file.
+    QHash<QString, QByteArray> m_draftBases;
+    // The same for the text on screen.
+    QByteArray m_textBase;
+    // Forgets a draft and what it was written against.
+    bool dropDraft(const QString &key);
+    // The file as it is, or nothing when it cannot be read.
+    static bool readFile(const QString &path, QByteArray *contents);
+    // A draft that says what its file says is not one.
+    void dropSettledDrafts();
+    std::shared_ptr<std::atomic_bool> m_cancelChecks;
+    void setKnownContents(const QByteArray &contents);
     QString m_recoveryPath;
     std::unique_ptr<QLockFile> m_recoveryLock;
 
