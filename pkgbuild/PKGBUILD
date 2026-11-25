@@ -2,14 +2,16 @@
 # Fork of omawrite by David Heinemeier Hansson <david@hey.com>
 
 pkgname=omanotes
-pkgver=0.4.8
+pkgver=0.5.0
 pkgrel=1
 pkgdesc='Markdown notes app with a vault sidebar, forked from OmaWrite'
 arch=('x86_64')
 url='https://github.com/cristian-fleischer/omanotes'
-license=('MIT' 'OFL-1.1')
+license=('MIT' 'OFL-1.1' 'HPND')
 install='omanotes.install'
-depends=('qt6-base' 'qt6-declarative' 'xdg-desktop-portal')
+depends=('hicolor-icon-theme' 'qt6-base' 'qt6-declarative' 'qt6-wayland' 'xdg-desktop-portal')
+optdepends=('ripgrep: faster content search in the sidebar')
+options=('!debug')
 makedepends=('gcc' 'make' 'qt6-base' 'qt6-declarative')
 # No conflicts with omawrite: different binary, desktop file, icon and settings
 # path, so both can be installed side by side.
@@ -26,6 +28,7 @@ package() {
   /usr/bin/install -Dm755 build/omanotes "$pkgdir/usr/bin/omanotes"
   /usr/bin/install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   /usr/bin/install -Dm644 fonts/OFL.txt "$pkgdir/usr/share/licenses/$pkgname/OFL.txt"
+  /usr/bin/install -Dm644 third_party/lexilla/LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE.lexilla"
   /usr/bin/install -Dm644 "$startdir/omanotes.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/omanotes.svg"
   /usr/bin/install -Dm644 "$startdir/omanotes.desktop" "$pkgdir/usr/share/applications/omanotes.desktop"
 }
