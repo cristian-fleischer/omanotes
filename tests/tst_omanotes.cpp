@@ -44,13 +44,9 @@ private slots:
         // main() loads these out of the binary's resources. The tests build no
         // resources, so load the files the resources are made from: without
         // them the bundled family is not a family at all here.
-        for (const QString &face : {QStringLiteral("Regular"), QStringLiteral("Italic"),
-                                    QStringLiteral("Bold"), QStringLiteral("BoldItalic")}) {
-            const QString path =
-                QFINDTESTDATA(QStringLiteral("../fonts/JetBrainsMonoNL-%1.ttf").arg(face));
-            QVERIFY2(!path.isEmpty(), qPrintable(face));
-            QVERIFY2(QFontDatabase::addApplicationFont(path) >= 0, qPrintable(path));
-        }
+        const QString fonts = QFINDTESTDATA("../fonts/JetBrainsMonoNL.ttc");
+        QVERIFY(!fonts.isEmpty());
+        QVERIFY(QFontDatabase::addApplicationFont(fonts) >= 0);
         QSettings::setDefaultFormat(QSettings::IniFormat);
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
                            m_settingsDirectory.path());

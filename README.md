@@ -4,10 +4,10 @@ A Markdown notes app for Linux: an editor that styles Markdown inline as you
 type, and a sidebar listing a folder of `.md` files. No GTK, no Chromium, no
 browser engine.
 
-Lean and quick on purpose. One 943 KB binary, nothing at runtime outside Qt 6,
-and a note on screen in well under half a second: 0.20 s for a short note and
-0.35 s for a 62 KB one, wall clock from exec to the window. The numbers are
-measured, and there is a [table of them](#footprint) further down.
+Lean and quick on purpose. One 757 KB binary, nothing at runtime outside Qt 6,
+and a note on screen in a sixth of a second: 0.15 s for a short note and 0.16 s
+for a 62 KB one, wall clock from exec to the window. The numbers are measured,
+and there is a [table of them](#footprint) further down.
 
 The buffer always holds your exact Markdown. Styling is applied over the source,
 never a conversion, and saving writes the bytes you see back unchanged.
@@ -309,8 +309,9 @@ The bundled font is JetBrains Mono NL 2.304, SIL Open Font License 1.1,
 compiled into the binary so it is there whether or not it is installed. NL is
 the variant without ligatures: a writing surface is the wrong place for `->` to
 turn into an arrow behind your back. The four faces are subset to the scripts a
-Markdown note uses, which is what keeps them at 258 KB rather than 405 KB; see
-`fonts/README.md` for the range and how to regenerate them.
+Markdown note uses and packed as one collection, which is what keeps them at 138
+KB rather than 405 KB; see `fonts/README.md` for the range and how to regenerate
+them. They are unpacked when the font is used, and not before.
 
 Text also follows the desktop text size — `omarchy display text size`, or GNOME's
 `text-scaling-factor` — and re-flows without a restart. The default of 12px leaves
@@ -319,33 +320,41 @@ there, and the zoom multiplies on top.
 
 ## Footprint
 
-Measured on Arch with Qt 6.11, a Wayland session and an AMD iGPU, against
-upstream omawrite 0.5.0 on the same machine and the same files. Startup is
-wall-clock from exec to the window on screen, best of five.
+Measured on Arch with Qt 6.12, Hyprland, an AMD iGPU and the performance power
+profile, against upstream omawrite 0.7.2 on the same machine and the same files.
+Startup is wall-clock from exec to the window on screen, the median of twenty
+shuffled runs. Memory is four seconds after that.
 
 | | Omanotes | omawrite |
 | --- | --- | --- |
-| Binary | 943 KB | 572 KB |
-| Installed package | 949 KB | 565 KB |
-| Download | 0.59 MB | 0.31 MB |
-| Window on screen, short note | 0.20 s | 0.20 s |
-| Window on screen, 62 KB note | 0.35 s | 0.22 s |
-| PSS, short note idle | 78 MB | 71 MB |
-| PSS, 62 KB note idle | 115 MB | 101 MB |
+| Binary | 757 KB | 965 KB |
+| Installed package | 764 KB | 972 KB |
+| Download | 451 KB | 353 KB |
+| Window on screen, short note | 0.15 s | 0.18 s |
+| Window on screen, 62 KB note | 0.16 s | 0.22 s |
+| PSS, short note idle | 100 MB | 115 MB |
+| PSS, 62 KB note idle | 109 MB | 146 MB |
 
-258 KB of the binary is the bundled font, compressed and subset. Of the code,
-measured before link-time optimisation folds it together: 379 KB is Lexilla's
-nine lexers, 333 KB this fork's own, and 170 KB upstream's editor. Compressing
-the resources, link-time optimisation with section garbage collection, and
-building Lexilla for size rather than speed are worth about 450 KB between
-them. All three are set in `omanotes.pro` and `lexilla.pri` with the
-reasoning.
+An empty Qt Quick window with the same style takes 0.11 s here, so most of what
+is left is Qt, the platform theme and the graphics driver. What keeps the rest
+small:
 
-Most of the memory is neither app: 38 MB of the 115 MB is the Mesa GL stack the
-scene graph pulls in, which `QT_QUICK_BACKEND=software` removes at the cost of
-frame rate. Qt's own libraries account for 16 MB of it, and the whole of
-Omanotes for about 14 MB more than upstream. Nothing polls: idle CPU is a few
-hundredths of a second per twelve.
+- The driver is opened on a thread of its own while the interface is read.
+- A note goes in with its formats, as one edit, and is laid out once. Only the
+  lines in view are handed to the scene graph.
+- Dialogs, menus, the search bar and the sidebar are made when they are first
+  shown. The bundled font is unpacked when it is first used.
+- The desktop's colour scheme, text size and fonts are asked for in one D-Bus
+  call.
+- Memory the allocator no longer needs goes back once a note is open.
+- `-Os`, link-time optimisation, section garbage collection, packed relocations,
+  and the four font faces compressed as one. All of it is set in `omanotes.pro`
+  and `lexilla.pri` with the reasoning.
+
+Power-saver roughly doubles the times. Most of the memory is neither app: some
+40 MB is the Mesa GL stack the scene graph pulls in, which
+`QT_QUICK_BACKEND=software` removes at the cost of frame rate. Nothing polls:
+idle CPU is a few hundredths of a second per twelve at most.
 
 ## Requirements
 

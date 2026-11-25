@@ -142,10 +142,7 @@ QString SystemFonts::fixedFamily() {
 
 QString SystemFonts::bundledFamily() {
     static const QString family = [] {
-        for (const char *face : {"Regular", "Italic", "Bold", "BoldItalic"}) {
-            QFontDatabase::addApplicationFont(
-                QStringLiteral(":/fonts/JetBrainsMonoNL-%1.ttf").arg(QLatin1String(face)));
-        }
+        QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/JetBrainsMonoNL.ttc"));
         return QString::fromLatin1(bundledName);
     }();
     return family;
