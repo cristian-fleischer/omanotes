@@ -1,4 +1,5 @@
 #include "systemfonts.h"
+#include "portalsettings.h"
 
 #include <QFile>
 #include <QFontDatabase>
@@ -9,14 +10,13 @@
 #include <QVariant>
 #include <QStandardPaths>
 #include <QStringList>
+#include <functional>
+#include <initializer_list>
 #include <utility>
 
 namespace {
 
-bool isInstalled(const QString &family) {
-    return !family.isEmpty()
-        && QFontDatabase::families().contains(family, Qt::CaseInsensitive);
-}
+constexpr char bundledName[] = "JetBrains Mono NL";
 
 // A font description carries the family and then how to draw it. Qt writes
 // "Noto Sans,10,-1,5,50,0,0,0,0,0"; GNOME writes "Noto Sans Bold 10". Take the
@@ -56,10 +56,15 @@ QString fromKde(const QString &key) {
         key);
 }
 
-// org.gnome.desktop.interface. Reading dconf means either linking glib or
-// parsing its database, so ask the tool that ships with it. It answers in about
-// three milliseconds and is asked at most twice in the life of the process.
+// org.gnome.desktop.interface. The settings portal hands it out, and has been
+// asked already for the colour scheme. Without one, reading dconf means either
+// linking glib or parsing its database, so ask the tool that ships with it:
+// a process of its own, which costs several times what the portal does.
 QString fromGnome(const QString &key) {
+    const QString fromPortal =
+        PortalSettings::atStartup(QStringLiteral("org.gnome.desktop.interface"), key).toString();
+    if (!fromPortal.isEmpty())
+        return SystemFonts::familyFromDescription(fromPortal);
     if (QStandardPaths::findExecutable(QStringLiteral("gsettings")).isEmpty())
         return {};
     QProcess gsettings;
@@ -85,9 +90,11 @@ QString fromQt(QFontDatabase::SystemFont role) {
     return resolved.isEmpty() ? font.family() : resolved;
 }
 
-QString firstInstalled(const QStringList &candidates) {
-    for (const QString &candidate : candidates) {
-        if (isInstalled(candidate))
+// Each is asked only when the ones before it had no answer.
+QString firstInstalled(std::initializer_list<std::function<QString()>> sources) {
+    for (const auto &source : sources) {
+        const QString candidate = source();
+        if (SystemFonts::isInstalled(candidate))
             return candidate;
     }
     return {};
@@ -118,19 +125,40 @@ QString SystemFonts::familyFromKdeglobals(const QString &path, const QString &ke
 }
 
 QString SystemFonts::interfaceFamily() {
-    static const QString family = firstInstalled({fromKde(QStringLiteral("font")),
-                                                  fromGnome(QStringLiteral("font-name")),
-                                                  fromQt(QFontDatabase::GeneralFont)});
+    static const QString family = firstInstalled(
+        {[] { return fromKde(QStringLiteral("font")); },
+         [] { return fromGnome(QStringLiteral("font-name")); },
+         [] { return fromQt(QFontDatabase::GeneralFont); }});
     return family;
 }
 
 QString SystemFonts::fixedFamily() {
-    static const QString family = firstInstalled({fromKde(QStringLiteral("fixed")),
-                                                  fromGnome(QStringLiteral("monospace-font-name")),
-                                                  fromQt(QFontDatabase::FixedFont)});
+    static const QString family = firstInstalled(
+        {[] { return fromKde(QStringLiteral("fixed")); },
+         [] { return fromGnome(QStringLiteral("monospace-font-name")); },
+         [] { return fromQt(QFontDatabase::FixedFont); }});
     return family;
 }
 
 QString SystemFonts::bundledFamily() {
-    return QStringLiteral("JetBrains Mono NL");
+    static const QString family = [] {
+        for (const char *face : {"Regular", "Italic", "Bold", "BoldItalic"}) {
+            QFontDatabase::addApplicationFont(
+                QStringLiteral(":/fonts/JetBrainsMonoNL-%1.ttf").arg(QLatin1String(face)));
+        }
+        return QString::fromLatin1(bundledName);
+    }();
+    return family;
+}
+
+bool SystemFonts::isBundled(const QString &family) {
+    return family.compare(QLatin1String(bundledName), Qt::CaseInsensitive) == 0;
+}
+
+bool SystemFonts::isInstalled(const QString &family) {
+    if (family.isEmpty())
+        return false;
+    if (isBundled(family))
+        bundledFamily();
+    return QFontDatabase::hasFamily(family);
 }

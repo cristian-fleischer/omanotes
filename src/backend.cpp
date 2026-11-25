@@ -664,6 +664,8 @@ QString Backend::resolveFontFamily(const QString &family) {
     if (wanted.isEmpty())
         return {};
 
+    if (wanted.startsWith(QStringLiteral("JetBrains Mono"), Qt::CaseInsensitive))
+        SystemFonts::bundledFamily();
     const QStringList known = QFontDatabase::families();
     QStringList words = wanted.split(QLatin1Char(' '), Qt::SkipEmptyParts);
     // Longest prefix wins, so "JetBrains Mono NL Bold" resolves to the family
@@ -1087,14 +1089,16 @@ void Backend::setCursorPosition(int position) {
 
 QVariantMap Backend::viewState() const {
     QSettings settings;
+    const QString fontFamily = settings.value(QStringLiteral("view/fontFamily")).toString();
+    if (SystemFonts::isBundled(fontFamily))
+        SystemFonts::bundledFamily();
     return {{QStringLiteral("zoom"),
              settings.value(QStringLiteral("view/zoom"), 1.0).toDouble()},
             {QStringLiteral("fullWidth"),
              settings.value(QStringLiteral("view/fullWidth"), false).toBool()},
             // Empty means "work it out": the desktop's monospace, then the
             // font in the binary.
-            {QStringLiteral("fontFamily"),
-             settings.value(QStringLiteral("view/fontFamily")).toString()},
+            {QStringLiteral("fontFamily"), fontFamily},
             // How wide the text column is, in characters, when it is not set to
             // fill the window.
             {QStringLiteral("contentColumns"),
@@ -1118,16 +1122,23 @@ QString Backend::interfaceFontFamily() {
         settings.value(QStringLiteral("view/interfaceFontFamily")).toString());
 }
 
+// A value that is already there is not written: every write rewrites the file
+// and waits for the disk, and a launch saves what it has just read.
+static void setIfChanged(QSettings &settings, const QString &key, const QVariant &value) {
+    if (!settings.contains(key) || settings.value(key).toString() != value.toString())
+        settings.setValue(key, value);
+}
+
 void Backend::saveViewState(qreal zoom, bool fullWidth, const QString &fontFamily,
                             int contentColumns, const QString &interfaceFontFamily) {
     QSettings settings;
-    settings.setValue(QStringLiteral("view/zoom"), zoom);
-    settings.setValue(QStringLiteral("view/fullWidth"), fullWidth);
+    setIfChanged(settings, QStringLiteral("view/zoom"), zoom);
+    setIfChanged(settings, QStringLiteral("view/fullWidth"), fullWidth);
     // Written even when empty, so every knob is visible in the file rather than
     // only after it has been changed once.
-    settings.setValue(QStringLiteral("view/fontFamily"), fontFamily);
-    settings.setValue(QStringLiteral("view/contentColumns"), contentColumns);
-    settings.setValue(QStringLiteral("view/interfaceFontFamily"), interfaceFontFamily);
+    setIfChanged(settings, QStringLiteral("view/fontFamily"), fontFamily);
+    setIfChanged(settings, QStringLiteral("view/contentColumns"), contentColumns);
+    setIfChanged(settings, QStringLiteral("view/interfaceFontFamily"), interfaceFontFamily);
 }
 
 QVariantMap Backend::sidebarState() const {
@@ -1348,6 +1359,21 @@ void Backend::restoreRecovery() {
     m_lineEnding = recovery.value(QStringLiteral("crlf")).toBool() ? LineEnding::CrLf
                                                                   : LineEnding::Lf;
     m_hasByteOrderMark = recovery.value(QStringLiteral("bom")).toBool();
+    const QUrl url(recovery.value(QStringLiteral("fileUrl")).toString());
+    // About to be replaced by the file the app was started with, which would
+    // put it away under its note. Put it there without showing it first: laying
+    // out a long note takes longer than everything else a launch does.
+    if (startedWithFile() && QFileInfo(m_startupFile).isFile()
+            && QFileInfo(m_startupFile).isReadable()) {
+        // Already among the drafts, if it had unsaved text. Snapshots from
+        // before there were drafts hold nothing but the one text.
+        if (!recovery.contains(QStringLiteral("drafts"))) {
+            m_drafts.insert(url.isValid() ? url.toString() : QString(),
+                            recovery.value(QStringLiteral("text")).toString());
+        }
+        emit draftsChanged();
+        return;
+    }
     loadDocumentText(recovery.value(QStringLiteral("text")).toString());
     const QUrl recoveredUrl(recovery.value(QStringLiteral("fileUrl")).toString());
     QFile diskFile(recoveredUrl.toLocalFile());

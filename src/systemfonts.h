@@ -19,8 +19,13 @@ QString interfaceFamily();
 // The monospace font the desktop is configured with. Empty as above.
 QString fixedFamily();
 
-// The font compiled into the binary, which is always there.
+// The font compiled into the binary, which is always there. Unpacking its four
+// faces and reading their coverage takes 5 ms, so it happens on the first call:
+// ask only when the font is going to be used.
 QString bundledFamily();
+bool isBundled(const QString &family);
+
+bool isInstalled(const QString &family);
 
 // The family out of a font description, in whichever syntax wrote it: Qt's
 // "Noto Sans,10,-1,5,50,0,0,0,0,0" or GNOME's "'Noto Sans Bold 10'". Exposed

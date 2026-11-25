@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QObject>
+#include <QVariant>
 
 class QDBusVariant;
 
@@ -25,11 +26,13 @@ private slots:
                                     const QDBusVariant &value);
 
 private:
-    bool detectDarkMode() const;
-    bool portalDarkMode(bool *known) const;
+    // Where a setting comes from: PortalSettings, as it was at startup or now.
+    using Setting = QVariant (*)(const QString &nameSpace, const QString &key);
+    bool detectDarkMode(Setting setting) const;
+    bool portalDarkMode(Setting setting, bool *known) const;
     bool qtDarkMode(bool *known) const;
     void setDarkMode(bool darkMode);
-    qreal detectTextScale() const;
+    qreal detectTextScale(Setting setting) const;
     void setTextScale(qreal textScale);
 
     bool m_darkMode = true;

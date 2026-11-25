@@ -7,6 +7,7 @@ TEMPLATE = app
 HEADERS += \
     src/backend.h \
     src/markdownhighlighter.h \
+    src/portalsettings.h \
     src/systemfonts.h \
     src/systemtheme.h \
     src/vaultmodel.h \
@@ -17,6 +18,7 @@ SOURCES += \
     src/main.cpp \
     src/backend.cpp \
     src/markdownhighlighter.cpp \
+    src/portalsettings.cpp \
     src/systemfonts.cpp \
     src/systemtheme.cpp \
     src/vaultmodel.cpp \

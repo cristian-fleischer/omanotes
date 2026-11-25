@@ -56,6 +56,9 @@ void VaultModel::loadSettings() {
     m_collapsedFolders = QSet<QString>(collapsed.begin(), collapsed.end());
     setSortMode(settings.value(sortModeSetting, QStringLiteral("name")).toString());
     setRoot(settings.value(rootSetting, defaultRoot()).toString());
+    // A note opened before there were any rows has one to select now.
+    if (!m_currentPath.isEmpty())
+        emit currentPathChanged();
 }
 
 void VaultModel::saveCollapsedFolders() {
@@ -70,7 +73,9 @@ void VaultModel::setRoot(const QString &root) {
         return;
 
     m_root = cleaned;
-    QSettings().setValue(rootSetting, m_root);
+    QSettings settings;
+    if (settings.value(rootSetting).toString() != m_root)
+        settings.setValue(rootSetting, m_root);
     emit rootChanged();
     refresh();
 }

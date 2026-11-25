@@ -128,10 +128,25 @@ bool boxDrawingTiles(const QFont &font) {
     return lineSpacing > 0 && raw.boundingRect(glyphs.constFirst()).height() >= lineSpacing;
 }
 
+// One character from each of the ranges the bundled font was subset to.
+bool coversANote(const QFont &font) {
+    const QRawFont raw = QRawFont::fromFont(font);
+    if (!raw.isValid())
+        return false;
+    for (const char32_t character : {U'\u0142', U'\u01dd', U'\u0259', U'\u0301', U'\u03b1',
+                                     U'\u0416', U'\u2014', U'\u2070', U'\u20ac', U'\u2116',
+                                     U'\u2192', U'\u2264', U'\u2318', U'\u2500', U'\u2588',
+                                     U'\u25b6', U'\u2610'}) {
+        if (!raw.supportsCharacter(character))
+            return false;
+    }
+    return true;
+}
+
 // An unknown name is not a font: QFont substitutes silently, so asking the
 // substitute whether it draws boxes answers about the wrong font.
 bool isInstalled(const QString &family) {
-    return QFontDatabase::families().contains(family, Qt::CaseInsensitive);
+    return SystemFonts::isInstalled(family);
 }
 
 QFont probeFont(const QString &family) {
@@ -483,7 +498,10 @@ void MarkdownHighlighter::rebuildFormats() {
         m_tableFamilies.append(m_formatFont.family());
     if (!systemFixed.isEmpty())
         m_tableFamilies.append(systemFixed);
-    m_tableFamilies.append(SystemFonts::bundledFamily());
+    // The bundled font stands behind whatever is missing from the first choice.
+    // With nothing missing there is nothing for it to do, and it stays packed.
+    if (m_tableFamilies.isEmpty() || !coversANote(QFont(m_tableFamilies.constFirst())))
+        m_tableFamilies.append(SystemFonts::bundledFamily());
 
     // Code has the stronger requirement: one font for the whole block, and that
     // font has to draw box characters that join, or every diagram in a fence

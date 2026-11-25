@@ -10,6 +10,7 @@ SOURCES += \
     ../src/markdownhighlighter.cpp \
     ../src/vaultmodel.cpp \
     ../src/lexillacodehighlighter.cpp \
+    ../src/portalsettings.cpp \
     ../src/systemfonts.cpp
 HEADERS += \
     ../src/backend.h \
@@ -17,6 +18,7 @@ HEADERS += \
     ../src/vaultmodel.h \
     ../src/codesyntaxhighlighter.h \
     ../src/lexillacodehighlighter.h \
+    ../src/portalsettings.h \
     ../src/systemfonts.h
 
 include(../lexilla.pri)

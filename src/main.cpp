@@ -1,5 +1,4 @@
 #include <QFont>
-#include <QFontDatabase>
 #include <QApplication>
 #include <QIcon>
 #include <QQmlApplicationEngine>
@@ -7,7 +6,7 @@
 #include <QQmlError>
 #include <QQuickStyle>
 #include <QUrl>
-#include <QWindow>
+#include <QQuickWindow>
 #include <QFile>
 
 #include "backend.h"
@@ -21,10 +20,6 @@ int main(int argc, char *argv[]) {
     app.setDesktopFileName(QStringLiteral("omanotes"));
     app.setWindowIcon(QIcon::fromTheme(QStringLiteral("omanotes")));
 
-    QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/JetBrainsMonoNL-Regular.ttf"));
-    QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/JetBrainsMonoNL-Italic.ttf"));
-    QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/JetBrainsMonoNL-Bold.ttf"));
-    QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/JetBrainsMonoNL-BoldItalic.ttf"));
     // QSettings resolves to ~/.config/omanotes/omanotes.conf. Leaving the
     // organisation domain unset keeps the path off omacom.io, so Omanotes
     // and OmaWrite never share a settings file.
@@ -34,8 +29,6 @@ int main(int argc, char *argv[]) {
 
     Backend backend(&app);
     VaultModel vault(&app);
-    // The root comes from settings, never from a path baked into the binary.
-    vault.loadSettings();
 
     SystemTheme systemTheme(&app);
     backend.setDarkMode(systemTheme.darkMode());
@@ -80,6 +73,12 @@ int main(int argc, char *argv[]) {
     if (args.size() > 1)
         backend.setStartupFile(args.at(1));
 
+    // The root comes from settings, never from a path baked into the binary.
+    // Scanning it is what a launch on the vault is for; with the sidebar away
+    // it can wait until the document is on screen.
+    if (!backend.startedWithFile())
+        vault.loadSettings();
+
     QQmlApplicationEngine engine;
     QObject::connect(&engine, &QQmlApplicationEngine::warnings, &app,
                      [](const QList<QQmlError> &warnings) {
@@ -96,7 +95,13 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
-    backend.setParentWindow(qobject_cast<QWindow *>(engine.rootObjects().constFirst()));
+    auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().constFirst());
+    backend.setParentWindow(window);
+    if (backend.startedWithFile()) {
+        QObject::connect(window, &QQuickWindow::frameSwapped, &vault,
+                         [&vault] { vault.loadSettings(); },
+                         Qt::ConnectionType(Qt::QueuedConnection | Qt::SingleShotConnection));
+    }
 
     if (backend.startedWithFile())
         backend.open(QUrl::fromLocalFile(backend.startupFile()));
