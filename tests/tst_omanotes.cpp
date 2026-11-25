@@ -1928,7 +1928,7 @@ private slots:
     // Typography is a block property, so every block needs one. Setting them
     // one at a time laid the document out once per block: 660 ms for this
     // note, and a second of frozen window before it appeared.
-    void opensALargeNoteQuickly() {
+    void opensALargeNoteInOneEdit() {
         QTemporaryDir directory;
         QVERIFY(directory.isValid());
         const QString path = directory.filePath(QStringLiteral("big.md"));
@@ -1950,20 +1950,19 @@ private slots:
         Backend backend;
         backend.attachDocument(editor->property("textDocument").value<QObject *>());
 
-        QElapsedTimer timer;
-        timer.start();
-        backend.open(QUrl::fromLocalFile(path));
-        const qint64 elapsed = timer.elapsed();
-
         QTextDocument *document =
             qobject_cast<QQuickTextDocument *>(
                 editor->property("textDocument").value<QObject *>())->textDocument();
         QVERIFY(document);
+
+        // Every edit the document finishes is a layout of what it touched. One
+        // for the text and its formats, one for the old text going: counted
+        // rather than timed, so that a slow machine is not a failure.
+        QSignalSpy edits(document, &QTextDocument::contentsChange);
+        backend.open(QUrl::fromLocalFile(path));
         QVERIFY(document->blockCount() > 1500);
-        // Well clear of what it costs, so this only fails if the per-block
-        // edit comes back rather than when the machine is busy.
-        QVERIFY2(elapsed < 300,
-                 qPrintable(QStringLiteral("opening took %1 ms").arg(elapsed)));
+        QVERIFY2(edits.count() < 10,
+                 qPrintable(QStringLiteral("opening took %1 edits").arg(edits.count())));
     }
 
     // The chrome's family is a config knob: main() reads it before any window

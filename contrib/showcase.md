@@ -1,3 +1,9 @@
+---
+title: Showcase
+tags: [markdown, notes]
+status: published
+---
+
 # Omanotes
 
 Plain Markdown in the buffer, styled over the source.

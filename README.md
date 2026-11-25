@@ -24,8 +24,8 @@ double-click once it is the default.
 The buffer always holds your exact Markdown. Styling is applied over the source,
 never a conversion, and saving writes the bytes you see back unchanged.
 
-![Omanotes showing headings, lists, tasks, a table, syntax-highlighted code and a
-box-drawing diagram](docs/omanotes.png)
+![Omanotes showing a collapsed YAML header, headings, lists, tasks, a table,
+syntax-highlighted code and a box-drawing diagram](docs/omanotes.png)
 
 That note is `contrib/showcase.md`. Open it to see what the editor draws over
 plain Markdown.
@@ -52,8 +52,8 @@ Omanotes adds:
 From the release:
 
 ```sh
-curl -LO https://github.com/cristian-fleischer/omanotes/releases/download/v0.5.0/omanotes-0.5.0-1-x86_64.pkg.tar.zst
-sudo pacman -U omanotes-0.5.0-1-x86_64.pkg.tar.zst
+curl -LO https://github.com/cristian-fleischer/omanotes/releases/download/v0.6.0/omanotes-0.6.0-1-x86_64.pkg.tar.zst
+sudo pacman -U omanotes-0.6.0-1-x86_64.pkg.tar.zst
 ```
 
 From source:
@@ -97,7 +97,7 @@ tested recipe, and say so if it does not work.
 ### Anywhere else
 
 `bin/build` needs `qmake6`, `make` and a C++17 compiler, so it works anywhere
-Qt 6 does. It is developed against Qt 6.11; nothing in it is known to need a
+Qt 6 does. It is developed against Qt 6.12; nothing in it is known to need a
 version that new, but no older Qt has been tested against.
 
 `bin/build` alone leaves the binary in `build/omanotes` without packaging, and
@@ -240,14 +240,15 @@ double-click gets once `xdg-mime default omanotes.desktop text/markdown` is set.
 - `Ctrl+M` drops the 65-character measure and lets the text use the window, as does the rightmost footer icon.
 - `Ctrl+U` toggles source view, as does the `</>` footer icon: the note as written, in one font, with no markers folded away and no slabs, grids, chips or bullets drawn over it. Code and tables keep their inset and line height, because those are block formats and changing them would go on the undo stack. Not remembered across launches.
 - `Ctrl+Shift+F` picks the editor font.
+- `Ctrl+Shift+T` lines up the source of the table under the caret.
 - `Ctrl+click` opens a link, a bare URL, or a path that exists next to the note.
 - `Ctrl+Shift+R` throws away the unsaved changes and reads the note back off the disk.
 - `Ctrl+P` opens the system print dialog.
 - `Ctrl+N` opens a new Omanotes window.
 - `Ctrl+Z`, `Ctrl+Shift+Z`, and `Ctrl+Y` handle undo and redo.
-- `Super+F` toggles fullscreen. Qt maps this key as `Meta+F`.
+- `Super+F` and `F11` toggle fullscreen. Qt maps the first as `Meta+F`.
 - `Ctrl+F` searches the document. Use `Enter` or `Ctrl+G` for the next match and `Shift+Enter` for the previous match, from wherever the caret is. The bar can stay open while you edit: the matches follow the text.
-- `Ctrl+H` opens find and replace.
+- `Ctrl+H` opens find and replace. Replacing goes on to the next match.
 - `Ctrl+B`, `Ctrl+I`, and `Ctrl+K` insert bold, italic, and link Markdown.
 - `Ctrl+?` shows the keyboard shortcut reference.
 
