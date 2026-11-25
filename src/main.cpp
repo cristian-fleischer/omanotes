@@ -9,8 +9,13 @@
 #include <QUrl>
 #include <QQuickWindow>
 #include <QFile>
+#include <QTimer>
 
 #include <memory>
+
+#ifdef __GLIBC__
+#include <malloc.h>
+#endif
 
 #include "backend.h"
 #include "systemfonts.h"
@@ -121,6 +126,20 @@ int main(int argc, char *argv[]) {
 
     if (backend.startedWithFile())
         backend.open(QUrl::fromLocalFile(backend.startupFile()));
+
+    // Laying a note out leaves the allocator holding several megabytes it has no
+    // use for, in an arena for every thread. Half a millisecond hands them back,
+    // once things have gone quiet.
+    QTimer trim;
+    trim.setSingleShot(true);
+    trim.setInterval(1500);
+    QObject::connect(&trim, &QTimer::timeout, [] {
+#ifdef __GLIBC__
+        malloc_trim(0);
+#endif
+    });
+    QObject::connect(&backend, &Backend::documentLoaded, &trim, qOverload<>(&QTimer::start));
+    trim.start();
 
     const int result = app.exec();
     // Before the objects the interface is bound to.
