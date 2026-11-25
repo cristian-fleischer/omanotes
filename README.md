@@ -107,6 +107,7 @@ The buffer is always your Markdown. These are drawn over it, never in it.
 | `` `code` `` | A rounded chip drawn behind the code, in the shade the sidebar uses. Backticks hidden. |
 | ` ```lang ` | A slab behind the code, syntax highlighted, the fence rows folded away. |
 | `---`, `***`, `___` | A rule across the page, which goes while the caret is on the line: `***` opens bold italic too. |
+| `---` YAML `---` at the top | One row naming its keys. Click it to open the header, highlighted as YAML, and again to close it. Closed whenever a note is opened; a search match inside opens it. |
 | `* item` | A bullet drawn in the asterisk's own cell. `-` and `+` are left alone. |
 | `- [ ]`, `[ ]` | A checkbox, with or without a list marker. Click it to toggle. |
 | `\| a \| b \|` | A table: slab, bold header, a rule under it, column rules, and every column lined up whether or not the source is. |

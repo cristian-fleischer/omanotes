@@ -1,3 +1,5 @@
+#include <QQuickItem>
+#include <QQuickWindow>
 #include <QtTest>
 #include <QAbstractTextDocumentLayout>
 #include <QFont>
@@ -2066,6 +2068,170 @@ private slots:
 
         // A rule with a blank line above it is a rule, not an underline.
         QCOMPARE(formatAt(document, 6, 0).fontPointSize(), 0.0);
+    }
+
+    // An underline that stops being one gives the line above it back.
+    void setextHeadingIsDroppedWithItsUnderline() {
+        QTextDocument document;
+        document.setDefaultFont(bodyFont());
+        MarkdownHighlighter highlighter(&document);
+        setDocumentText(document, QStringLiteral("Title\n---\nnext"));
+        QCOMPARE(formatAt(document, 0, 0).fontPointSize(), 12.0 * 1.6);
+
+        QTextCursor cursor(&document);
+        cursor.setPosition(9);
+        cursor.insertText(QStringLiteral(" item"));
+        QCoreApplication::processEvents();
+        QCOMPARE(formatAt(document, 0, 0).fontPointSize(), 0.0);
+
+        // A lone dash is a list item being started.
+        setDocumentText(document, QStringLiteral("Title\n-"));
+        QCOMPARE(formatAt(document, 0, 0).fontPointSize(), 0.0);
+    }
+
+    void frontMatterDetection() {
+        const auto endOf = [](const char *text) {
+            QTextDocument document;
+            document.setPlainText(QString::fromUtf8(text));
+            return MarkdownHighlighter::frontMatterEnd(&document);
+        };
+        QCOMPARE(endOf("---\nkey: SCA-1\nsupersedes: null\n---\n\n# T"), 3);
+        QCOMPARE(endOf("---\ntags:\n- a\n  - b\n# note\n\n\"q k\": v\n...\nx"), 7);
+        QCOMPARE(endOf("---\nkey: v\n---"), 2);
+        // Rules, not headers.
+        QCOMPARE(endOf("---\n\nkey: v\n\n---"), -1);
+        QCOMPARE(endOf("---\nsome prose\n---"), -1);
+        QCOMPARE(endOf("---\nkey: v\nsome prose\n---"), -1);
+        QCOMPARE(endOf("---\nkey: v"), -1);
+        QCOMPARE(endOf("\n---\nkey: v\n---"), -1);
+        QCOMPARE(endOf("---\n---"), -1);
+        QCOMPARE(endOf(""), -1);
+
+        QCOMPARE(Backend::titleFromText(QStringLiteral("---\nkey: v\n---\n\n# Title")),
+                 QStringLiteral("Title"));
+        QCOMPARE(Backend::titleFromText(QStringLiteral("---\nkey: v\n---")), QString());
+    }
+
+    // The closing row is not the underline of a heading, however the header
+    // came to be: set whole, or closed and opened again by an edit.
+    void frontMatterIsNotAHeading() {
+        QTextDocument document;
+        document.setDefaultFont(bodyFont());
+        MarkdownHighlighter highlighter(&document);
+        setDocumentText(document, QStringLiteral("---\nkey: v\nlast: null\n---\nbody\n"));
+        QCOMPARE(formatAt(document, 2, 0).fontPointSize(), 0.0);
+        QVERIFY(MarkdownHighlighter::isFencedState(document.findBlockByNumber(2).userState()));
+        QVERIFY(!MarkdownHighlighter::isFencedState(document.findBlockByNumber(4).userState()));
+
+        QTextCursor cursor(&document);
+        cursor.setPosition(0);
+        cursor.insertText(QStringLiteral("x"));
+        QCoreApplication::processEvents();
+        QCOMPARE(formatAt(document, 2, 0).fontPointSize(), 12.0 * 1.6);
+        cursor.deletePreviousChar();
+        QCoreApplication::processEvents();
+        QCOMPARE(formatAt(document, 2, 0).fontPointSize(), 0.0);
+    }
+
+    void frontMatterCollapses() {
+        QTemporaryDir directory;
+        const QString path = directory.filePath(QStringLiteral("spec.md"));
+        const QByteArray bytes("---\nkey: SCA-1\nstatus: proposed\n---\n\n# Spec\n\nbody\n");
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write(bytes);
+        file.close();
+
+        Backend backend;
+        VaultModel vault;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        engine.rootContext()->setContextProperty(QStringLiteral("vault"), &vault);
+        QQmlComponent component(&engine,
+                                QUrl::fromLocalFile(QFINDTESTDATA("../src/Main.qml")));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+        QTextDocument *document = editor->property("textDocument")
+                                      .value<QQuickTextDocument *>()->textDocument();
+        backend.open(QUrl::fromLocalFile(path));
+        QCoreApplication::processEvents();
+
+        // Hidden on open, with the caret under it and nothing to undo or save.
+        QVERIFY(backend.frontMatterCollapsed());
+        QCOMPARE(backend.frontMatterSummary(), QStringLiteral("key, status"));
+        QVERIFY(document->findBlockByNumber(0).isVisible());
+        QVERIFY(!document->findBlockByNumber(1).isVisible());
+        QVERIFY(!document->findBlockByNumber(3).isVisible());
+        QVERIFY(document->findBlockByNumber(4).isVisible());
+        const int body = backend.frontMatterBodyPosition();
+        QCOMPARE(editor->property("cursorPosition").toInt(), body + 1); // past the blank line
+        QVERIFY(!backend.modified());
+        QVERIFY(!document->isUndoAvailable());
+        const qreal collapsedHeight = document->size().height();
+
+        // The arrows step over it in both directions.
+        editor->setProperty("cursorPosition", body - 1);
+        QCOMPARE(editor->property("cursorPosition").toInt(), 0);
+        editor->setProperty("cursorPosition", 4);
+        QCOMPARE(editor->property("cursorPosition").toInt(), body);
+        QVERIFY(backend.frontMatterCollapsed());
+
+        // Source view shows everything.
+        const auto caretY = [editor] {
+            return editor->property("cursorRectangle").toRectF().y();
+        };
+        const qreal collapsedCaretY = caretY();
+        backend.setSourceView(true);
+        QVERIFY(document->findBlockByNumber(1).isVisible());
+        backend.setSourceView(false);
+        QVERIFY(!document->findBlockByNumber(1).isVisible());
+
+        // Clicking the row opens and closes it.
+        auto *row = window->findChild<QQuickItem *>(QStringLiteral("frontMatterRow"));
+        QVERIFY(row);
+        auto *quickWindow = qobject_cast<QQuickWindow *>(window.data());
+        QVERIFY(quickWindow);
+        QTest::qWait(100);
+        const QPoint centre =
+            row->mapToScene(QPointF(row->width() / 2, row->height() / 2)).toPoint();
+        QTest::mouseClick(quickWindow, Qt::LeftButton, Qt::NoModifier, centre);
+        QVERIFY(!backend.frontMatterCollapsed());
+        QVERIFY(document->size().height() > collapsedHeight);
+        QVERIFY(caretY() > collapsedCaretY);
+        QVERIFY(document->findBlockByNumber(3).isVisible());
+
+        // Typing in the body of such a note is still one step to undo.
+        backend.setFrontMatterCollapsed(true);
+        editor->setProperty("cursorPosition", document->characterCount() - 2);
+        QVERIFY(QMetaObject::invokeMethod(editor, "forceActiveFocus"));
+        for (char key : {'a', 'b', 'c'})
+            QTest::keyClick(quickWindow, key);
+        QCOMPARE(document->toPlainText().toUtf8(), QByteArray(bytes).replace("body", "bodyabc"));
+        QCOMPARE(document->availableUndoSteps(), 1);
+        QVERIFY(QMetaObject::invokeMethod(editor, "undo"));
+        QCOMPARE(document->toPlainText().toUtf8(), bytes);
+
+        // A selection reaching into a collapsed header opens it.
+        backend.setFrontMatterCollapsed(true);
+        QVERIFY(QMetaObject::invokeMethod(editor, "select", Q_ARG(int, 4), Q_ARG(int, 7)));
+        QVERIFY(!backend.frontMatterCollapsed());
+
+        // Breaking the header leaves no text hidden, and undo brings it back.
+        backend.setFrontMatterCollapsed(true);
+        QVERIFY(QMetaObject::invokeMethod(editor, "insert", Q_ARG(int, 0),
+                                          Q_ARG(QString, QStringLiteral("x"))));
+        QVERIFY(!backend.hasFrontMatter());
+        for (QTextBlock block = document->begin(); block.isValid(); block = block.next())
+            QVERIFY(block.isVisible());
+        while (document->isUndoAvailable())
+            QVERIFY(QMetaObject::invokeMethod(editor, "undo"));
+        QVERIFY(backend.hasFrontMatter());
+        QCOMPARE(document->toPlainText().toUtf8(), bytes);
+        backend.save();
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        QCOMPARE(file.readAll(), bytes);
     }
 
     void vaultModelLists() {

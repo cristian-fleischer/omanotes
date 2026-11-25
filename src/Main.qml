@@ -568,6 +568,12 @@ ApplicationWindow {
         target: backend
 
         function onSourceViewChanged() { win.scheduleCodeSlabs(); }
+        function onFrontMatterChanged() {
+            win.scheduleCodeSlabs();
+            if (backend.frontMatterCollapsed && backend.isHiddenPosition(editor.cursorPosition))
+                editor.cursorPosition = Math.max(0, backend.frontMatterBodyPosition());
+        }
+        function onFrontMatterLaidOut() { editor.refreshCursor(); }
 
         // Whatever route a file arrived by, the sidebar highlights it.
         function onFileUrlChanged() {
@@ -577,8 +583,14 @@ ApplicationWindow {
         // A note opens at its first line. Loading the text leaves the document
         // cursor after the last character, which drops the reader at the foot
         // of anything longer than the window.
+        // Under the header, if it has one: a letter typed above the opening
+        // dashes would end the header.
         function onDocumentLoaded() {
-            editor.cursorPosition = 0;
+            var start = Math.max(0, backend.frontMatterBodyPosition());
+            while (start > 0 && start < editor.text.length - 1 && editor.text.charAt(start) === "\n")
+                ++start;
+            editor.cursorPosition = start;
+            editor.lastCursorPosition = editor.cursorPosition;
             editorFlick.contentY = 0;
         }
 
@@ -1167,8 +1179,43 @@ ApplicationWindow {
                         width: 1
                         color: win.strongTextColor
                     }
-                    onCursorRectangleChanged: editorFlick.ensureCursorVisible()
-                    onCursorPositionChanged: backend.setCursorPosition(cursorPosition)
+                    onCursorRectangleChanged: {
+                        if (!refreshingCursor)
+                            editorFlick.ensureCursorVisible();
+                    }
+                    // TextEdit places its caret when the caret moves, not when
+                    // rows above it are hidden or shown. Move it and back.
+                    property bool refreshingCursor: false
+                    function refreshCursor() {
+                        refreshingCursor = true;
+                        var start = selectionStart, end = selectionEnd, at = cursorPosition;
+                        cursorPosition = at > 0 ? at - 1 : Math.min(1, text.length);
+                        if (start === end)
+                            cursorPosition = at;
+                        else if (at === start)
+                            select(end, start);
+                        else
+                            select(start, end);
+                        refreshingCursor = false;
+                    }
+                    property int lastCursorPosition: 0
+                    onCursorPositionChanged: {
+                        if (refreshingCursor)
+                            return;
+                        if (backend.isHiddenPosition(cursorPosition)) {
+                            // The arrows step over a collapsed header. A
+                            // selection reaching into it, which a search match
+                            // is, opens it.
+                            var body = backend.frontMatterBodyPosition();
+                            if (selectionStart === selectionEnd && body >= 0) {
+                                cursorPosition = lastCursorPosition >= body ? 0 : body;
+                                return;
+                            }
+                            backend.frontMatterCollapsed = false;
+                        }
+                        lastCursorPosition = cursorPosition;
+                        backend.setCursorPosition(cursorPosition);
+                    }
                     // A zoom step changes the font; the headings are sized
                     // from it and have to be redone. Later, so the document
                     // has the new font by the time it is read.
@@ -1255,6 +1302,13 @@ ApplicationWindow {
                         var before = text.slice(0, cursorPosition);
                         var fences = (before.match(/^\s*```/gm) || []).length;
                         if ((fences % 2) === 1) {
+                            replaceSelectionWith("\n");
+                            return;
+                        }
+                        // Nor does a YAML header take a blank line between keys,
+                        // including one that has no closing row yet.
+                        if (/^---[ \t]*(\n(?!---|\.\.\.)\S[^\n]*(\n(?!---|\.\.\.)[^\n]+)*)?$/.test(before)
+                                && (before.indexOf("\n") < 0 || /^[^\n]*\n[^\n:#]+:(\s|$)/.test(before))) {
                             replaceSelectionWith("\n");
                             return;
                         }
@@ -1496,6 +1550,41 @@ ApplicationWindow {
                         font.family: editor.font.family
                         font.pixelSize: editor.font.pixelSize
                         font.weight: editor.font.weight
+                    }
+
+                    // The header's first row: a label in place of the dashes,
+                    // and the whole row is the switch. The dashes come back
+                    // while the caret is on it.
+                    MouseArea {
+                        id: frontMatterRow
+                        objectName: "frontMatterRow"
+                        visible: backend.hasFrontMatter && !backend.sourceView
+                        x: 0
+                        y: win.codeSlabs.length > 0 ? win.codeSlabs[0].y - win.blockPadding : 0
+                        width: parent.width
+                        height: 2 * win.blockPadding + writerFontMetrics.height
+                        cursorShape: Qt.PointingHandCursor
+                        Accessible.role: Accessible.Button
+                        Accessible.name: "Properties"
+                        Accessible.onPressAction: backend.frontMatterCollapsed = !backend.frontMatterCollapsed
+                        onClicked: backend.frontMatterCollapsed = !backend.frontMatterCollapsed
+
+                        Text {
+                            visible: editor.cursorPosition > 3
+                            anchors.left: parent.left
+                            anchors.leftMargin: win.blockPadding
+                            anchors.right: parent.right
+                            anchors.rightMargin: win.blockPadding
+                            anchors.verticalCenter: parent.verticalCenter
+                            elide: Text.ElideRight
+                            textFormat: Text.PlainText
+                            text: (backend.frontMatterCollapsed ? "\u25b6 " : "\u25bc ")
+                                + (backend.frontMatterCollapsed ? backend.frontMatterSummary : "properties")
+                            color: frontMatterRow.containsMouse ? win.textColor : win.mutedColor
+                            font.family: editor.font.family
+                            font.pixelSize: Math.round(editor.font.pixelSize * 0.85)
+                        }
+                        hoverEnabled: true
                     }
 
                     Component.onCompleted: {

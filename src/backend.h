@@ -53,6 +53,13 @@ class Backend : public QObject {
     // Prose line height as a percentage of the font's own, from
     // typography/lineHeight. What a "line" is when the wheel scrolls by lines.
     Q_PROPERTY(qreal proseLineHeight READ proseLineHeight CONSTANT)
+    // The YAML header at the top of a note. A view state like sourceView: rows
+    // are hidden in the layout, the text and the undo history are untouched.
+    Q_PROPERTY(bool hasFrontMatter READ hasFrontMatter NOTIFY frontMatterChanged)
+    Q_PROPERTY(bool frontMatterCollapsed READ frontMatterCollapsed WRITE setFrontMatterCollapsed
+                   NOTIFY frontMatterChanged)
+    // The keys in it, for the row it collapses to.
+    Q_PROPERTY(QString frontMatterSummary READ frontMatterSummary NOTIFY frontMatterChanged)
     // What the sidebar should call the open note while its file is still the
     // placeholder a new note is created with. Empty once it has a real name.
     Q_PROPERTY(QString placeholderTitle READ placeholderTitle NOTIFY placeholderTitleChanged)
@@ -113,6 +120,14 @@ public:
     // A name `VaultModel::createNote` hands out: untitled.md, untitled-2.md.
     static bool isPlaceholderName(const QString &fileName);
     QString placeholderTitle() const;
+
+    bool hasFrontMatter() const { return m_frontMatterEnd > 0; }
+    bool frontMatterCollapsed() const { return m_frontMatterCollapsed; }
+    void setFrontMatterCollapsed(bool collapsed);
+    QString frontMatterSummary() const;
+    // Where the text under the header starts, or -1 when nothing follows it.
+    Q_INVOKABLE int frontMatterBodyPosition() const;
+    Q_INVOKABLE bool isHiddenPosition(int position) const;
 
     Q_INVOKABLE void attachDocument(QObject *textDocument);
     // The editor's font changed, on a zoom step or a new family: the headings
@@ -206,6 +221,9 @@ signals:
     void darkModeChanged();
     void textScaleChanged();
     void sourceViewChanged();
+    void frontMatterChanged();
+    // Rows were hidden or shown. Not sent for an ordinary edit.
+    void frontMatterLaidOut();
     void themeColorsChanged();
     void closeAfterSave();
     void openDialogRequested();
@@ -247,7 +265,8 @@ private:
     void scheduleWordCount();
     void applyDocumentTypography();
     void updateTableGrids();
-    void reapplyTypographyToChange();
+    void reapplyTypographyToChange(int throughBlock = -1);
+    void updateFrontMatterVisibility();
     bool isCodeBlock(const QTextBlock &block) const;
     // What a block is styled as. Working it out costs a regex, so the
     // typography pass does it once per block and passes it down.
@@ -278,6 +297,8 @@ private:
     bool m_darkMode = true;
     qreal m_textScale = 1.0;
     bool m_sourceView = false;
+    int m_frontMatterEnd = -1;
+    bool m_frontMatterCollapsed = false;
     bool m_loading = false;
     bool m_closeAfterSave = false;
     bool m_formattingTypography = false;

@@ -205,6 +205,7 @@ void Backend::setSourceView(bool sourceView) {
     m_sourceView = sourceView;
     if (m_highlighter)
         m_highlighter->setPlain(sourceView);
+    updateFrontMatterVisibility();
     emit sourceViewChanged();
 }
 
@@ -482,7 +483,17 @@ bool Backend::editorTextChanged() {
     if (m_document) {
         // Not only when blocks are added: typing a pipe turns a prose line into
         // a table row, which wants a different line height at the same count.
-        reapplyTypographyToChange();
+        const int headerBefore = m_frontMatterEnd;
+        m_frontMatterEnd = MarkdownHighlighter::frontMatterEnd(m_document);
+        if (m_highlighter)
+            m_highlighter->refreshFrontMatter();
+        if (m_frontMatterEnd < 0)
+            m_frontMatterCollapsed = false;
+        reapplyTypographyToChange(headerBefore == m_frontMatterEnd
+                                      ? -1 : qMax(headerBefore, m_frontMatterEnd));
+        updateFrontMatterVisibility();
+        if (headerBefore >= 0 || m_frontMatterEnd >= 0)
+            emit frontMatterChanged();
         m_formattedBlockCount = m_document->blockCount();
         updateTableGrids();
     }
@@ -1178,10 +1189,16 @@ void Backend::loadDocumentText(const QString &text) {
         m_highlighter->setTableState(-1, -1, state.first, state.second, false);
     }
     m_document->setPlainText(text);
+    m_frontMatterEnd = MarkdownHighlighter::frontMatterEnd(m_document);
+    m_frontMatterCollapsed = hasFrontMatter();
     m_lastDocumentText = text;
     m_loading = false;
 
+    if (m_highlighter)
+        m_highlighter->refreshFrontMatter();
     applyDocumentTypography();
+    updateFrontMatterVisibility();
+    emit frontMatterChanged();
     m_wordCountTimer.stop();
     setWordCount(countWords(text));
     updateCurrentTitle(text);
@@ -1554,7 +1571,19 @@ QString Backend::titleFromText(const QString &text) {
     // Scans to the first line with anything on it and stops, so this costs the
     // same on a 60 KB note as on a one-liner.
     QStringView line;
-    for (qsizetype start = 0; start < text.size();) {
+    qsizetype from = 0;
+    const int headerEnd = MarkdownHighlighter::frontMatterEnd([&text, &from](QString *line) {
+        if (from > text.size())
+            return false;
+        qsizetype end = text.indexOf(QLatin1Char('\n'), from);
+        if (end < 0)
+            end = text.size();
+        *line = text.mid(from, end - from);
+        from = end + 1;
+        return true;
+    });
+    // A YAML header says nothing a title could be made of.
+    for (qsizetype start = headerEnd >= 0 ? from : 0; start < text.size();) {
         qsizetype end = text.indexOf(QLatin1Char('\n'), start);
         if (end < 0)
             end = text.size();
@@ -1706,7 +1735,8 @@ void Backend::scheduleWordCount() {
 // Line height is a block property, so it is the one part of the styling the
 // highlighter cannot do: QSyntaxHighlighter only sets character formats.
 bool Backend::isCodeBlock(const QTextBlock &block) const {
-    if (MarkdownHighlighter::isFencedState(block.userState()))
+    if (block.blockNumber() <= m_frontMatterEnd
+            || MarkdownHighlighter::isFencedState(block.userState()))
         return true;
     // A closing fence carries the Normal state, so the row itself still has to
     // be recognised. This runs for every block of the document on every edit,
@@ -1796,6 +1826,69 @@ void Backend::documentFontChanged() {
         m_highlighter->refreshForDocumentFont();
 }
 
+void Backend::setFrontMatterCollapsed(bool collapsed) {
+    if (m_frontMatterCollapsed == collapsed || (collapsed && !hasFrontMatter()))
+        return;
+    m_frontMatterCollapsed = collapsed;
+    updateFrontMatterVisibility();
+    emit frontMatterChanged();
+}
+
+QString Backend::frontMatterSummary() const {
+    static const QRegularExpression keyRe(QStringLiteral("^([^\\s#:-][^:#]*):(?:\\s|$)"));
+    QStringList keys;
+    for (int number = 1; number < m_frontMatterEnd; ++number) {
+        const QRegularExpressionMatch key =
+            keyRe.match(m_document->findBlockByNumber(number).text());
+        if (key.hasMatch())
+            keys.append(key.captured(1).trimmed());
+    }
+    return keys.join(QStringLiteral(", "));
+}
+
+int Backend::frontMatterBodyPosition() const {
+    if (!hasFrontMatter())
+        return -1;
+    const QTextBlock body = m_document->findBlockByNumber(m_frontMatterEnd + 1);
+    return body.isValid() ? body.position() : -1;
+}
+
+bool Backend::isHiddenPosition(int position) const {
+    return m_document && !m_document->findBlock(position).isVisible()
+        && m_document->findBlock(position).isValid();
+}
+
+// Every block is looked at, not only the header's: an edit can carry a hidden
+// block out of it, and text nobody can see must not be left behind.
+void Backend::updateFrontMatterVisibility() {
+    if (!m_document)
+        return;
+    const bool hide = m_frontMatterCollapsed && !m_sourceView;
+    bool changed = false;
+    int through = 0;
+    for (QTextBlock block = m_document->begin(); block.isValid(); block = block.next()) {
+        const int number = block.blockNumber();
+        const bool visible = !(hide && number > 0 && number <= m_frontMatterEnd);
+        if (block.isVisible() == visible)
+            continue;
+        block.setVisible(visible);
+        changed = true;
+        through = block.position() + block.length();
+    }
+    if (!changed)
+        return;
+    // Nothing lands on the undo stack. The edit block is what makes the change
+    // reach the editor, which otherwise keeps the rows it has already drawn.
+    const bool formatting = m_formattingTypography;
+    m_formattingTypography = true;
+    QTextCursor cursor(m_document);
+    cursor.beginEditBlock();
+    m_document->markContentsDirty(0, through);
+    cursor.endEditBlock();
+    m_formattingTypography = formatting;
+    emit frontMatterLaidOut();
+}
+
 QString Backend::themeMarker() const {
     return MarkdownHighlighter::markerColorFor(m_darkMode).name();
 }
@@ -1809,9 +1902,19 @@ QVariantList Backend::fencedCodeRegions() const {
     if (!m_document)
         return regions;
 
+    // The header is a slab of its own, even with a fence straight under it, and
+    // no taller than its first row while the rest is hidden.
+    QTextBlock start = m_document->begin();
+    if (hasFrontMatter()) {
+        const QTextBlock end = m_document->findBlockByNumber(m_frontMatterEnd);
+        regions.append(QVariantMap{{QStringLiteral("start"), 0},
+                                   {QStringLiteral("end"), end.isVisible() ? end.position() : 0}});
+        start = end.next();
+    }
+
     QTextBlock first;
     QTextBlock previous;
-    for (QTextBlock block = m_document->begin(); block.isValid(); block = block.next()) {
+    for (QTextBlock block = start; block.isValid(); block = block.next()) {
         if (isCodeBlock(block)) {
             if (!first.isValid())
                 first = block;
@@ -1967,7 +2070,7 @@ void Backend::applyDocumentTypography() {
     updateTableGrids();
 }
 
-void Backend::reapplyTypographyToChange() {
+void Backend::reapplyTypographyToChange(int throughBlock) {
     if (!m_document)
         return;
 
@@ -1982,6 +2085,13 @@ void Backend::reapplyTypographyToChange() {
         touched.append(block);
         if (block == lastChanged)
             break;
+    }
+
+    // A header that appeared, moved or went restyles rows nobody edited.
+    for (int number = 0; number <= throughBlock; ++number) {
+        const QTextBlock block = m_document->findBlockByNumber(number);
+        if (block.isValid())
+            touched.append(block);
     }
 
     // Opening or closing a fence restates every line under it. The highlighter

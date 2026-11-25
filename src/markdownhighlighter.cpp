@@ -61,8 +61,10 @@ bool isTableRow(const QString &line) {
 }
 
 // `Title` over `===` is an H1 and over `---` an H2. Returns 0 for anything else.
+// A lone `-` is a list item being started, not an underline: taking it for one,
+// as CommonMark does, blew the line above up for the length of a keystroke.
 int setextUnderlineLevel(const QString &line) {
-    static const QRegularExpression re(QStringLiteral("^\\s{0,3}(=+|-+)\\s*$"));
+    static const QRegularExpression re(QStringLiteral("^\\s{0,3}(=+|-{2,})\\s*$"));
     const QRegularExpressionMatch match = re.match(line);
     if (!match.hasMatch())
         return 0;
@@ -164,6 +166,43 @@ QString firstTilingMonospaceFamily() {
 }
 
 } // namespace
+
+int MarkdownHighlighter::frontMatterEnd(const std::function<bool(QString *)> &nextLine) {
+    static const QRegularExpression keyRe(QStringLiteral(
+        "^(?:\"[^\"]*\"|'[^']*'|[\\w][^:#]*):(?:\\s|$)"));
+    static const QRegularExpression restRe(QStringLiteral("^(?:\\s|#|-\\s|-$|[\\]}])"));
+
+    QString line;
+    if (!nextLine(&line) || line.trimmed() != QStringLiteral("---") || line.at(0).isSpace())
+        return -1;
+    for (int number = 1; nextLine(&line); ++number) {
+        const bool key = keyRe.match(line).hasMatch();
+        if (number == 1) {
+            if (!key)
+                return -1;
+            continue;
+        }
+        if (key || line.isEmpty())
+            continue;
+        const QStringView row = QStringView(line).trimmed();
+        if (!line.at(0).isSpace() && (row == QStringLiteral("---") || row == QStringLiteral("...")))
+            return number;
+        if (!restRe.match(line).hasMatch())
+            return -1;
+    }
+    return -1;
+}
+
+int MarkdownHighlighter::frontMatterEnd(const QTextDocument *document) {
+    QTextBlock block = document ? document->begin() : QTextBlock();
+    return frontMatterEnd([&block](QString *line) {
+        if (!block.isValid())
+            return false;
+        *line = block.text();
+        block = block.next();
+        return true;
+    });
+}
 
 bool MarkdownHighlighter::isTableRow(const QString &text) {
     return ::isTableRow(text);
@@ -644,7 +683,36 @@ void MarkdownHighlighter::highlightBlock(const QString &text) {
         QMetaObject::invokeMethod(this, "rehighlight", Qt::QueuedConnection);
     }
 
-    if (!highlightFencedCode(text) && !text.isEmpty()) {
+    // The block at the top always asks again: a new document may come round to
+    // the revision of the one it replaced.
+    if (document() && (currentBlock().blockNumber() == 0
+                       || m_frontMatterRevision != document()->revision())) {
+        m_frontMatterRevision = document()->revision();
+        const int end = frontMatterEnd(document());
+        if (end != m_frontMatterEnd) {
+            // The rows of the old header, and those of the new one above the
+            // edit, are not part of this pass. The widest of the two is redone.
+            m_frontMatterRefresh = qMax(m_frontMatterRefresh, qMax(end, m_frontMatterEnd));
+            m_frontMatterEnd = end;
+            QMetaObject::invokeMethod(this, "refreshFrontMatter", Qt::QueuedConnection);
+        }
+    }
+
+    // This line may have been the underline that made a heading of the one
+    // above. That one was not edited, so nothing else would set it back.
+    const QTextBlock above = currentBlock().previous();
+    if (above.isValid() && above.layout()
+            && (setextUnderlineLevel(text) == 0 || !isParagraphLine(above.text()))) {
+        const QList<QTextLayout::FormatRange> formats = above.layout()->formats();
+        for (const QTextLayout::FormatRange &range : formats) {
+            if (range.format.hasProperty(SetextProperty)) {
+                scheduleSetextRefresh(above.blockNumber());
+                break;
+            }
+        }
+    }
+
+    if (!highlightFrontMatter(text) && !highlightFencedCode(text) && !text.isEmpty()) {
         if (highlightTableRow(text)) {
             applyBlockState(TableRow);
         } else if (highlightMarkers(text)) {
@@ -661,6 +729,54 @@ void MarkdownHighlighter::highlightBlock(const QString &text) {
         setFormat(0, text.length(), QTextCharFormat());
 
     highlightSearch(text);
+}
+
+void MarkdownHighlighter::refreshFrontMatter() {
+    if (!document())
+        return;
+    const int end = frontMatterEnd(document());
+    const int last = qMax(m_frontMatterRefresh,
+                          end == m_frontMatterEnd ? -1 : qMax(end, m_frontMatterEnd));
+    m_frontMatterEnd = end;
+    m_frontMatterRefresh = -1;
+    if (last < 0)
+        return;
+    for (int number = 0; number <= last + 1; ++number) {
+        const QTextBlock block = document()->findBlockByNumber(number);
+        if (block.isValid())
+            rehighlightBlock(block);
+    }
+}
+
+// The YAML header is drawn as a block of YAML code: its rows carry the fenced
+// state, so whatever leaves code alone leaves it alone as well, and its closing
+// row is not the underline of a heading.
+bool MarkdownHighlighter::highlightFrontMatter(const QString &text) {
+    const int number = currentBlock().blockNumber();
+    if (number > m_frontMatterEnd)
+        return false;
+
+    const bool revealed = m_revealedFirst >= 0 && number >= m_revealedFirst
+        && number <= m_revealedLast;
+    if (number == m_frontMatterEnd) {
+        applyBlockState(Normal);
+        setFormat(0, text.length(), revealed ? m_fenceFormat : m_hiddenMarkerFormat);
+        return true;
+    }
+
+    const int languageIndex = languageIndexFor(QStringLiteral("yaml"));
+    int codeState = 0;
+    if (number == 0) {
+        // Keeps its height: a label is drawn in the row in place of the dashes.
+        setFormat(0, text.length(),
+                  number == m_activeBlock ? m_fenceFormat : m_invisibleMarkerFormat);
+    } else {
+        setFormat(0, text.length(), m_codeBlockFormat);
+        codeState = highlightCode(text, languageIndex,
+                                  number == 1 ? 0 : (previousBlockState() >> 16) & 0xff);
+    }
+    applyBlockState(InFencedCode | (languageIndex << 8) | (codeState << 16));
+    return true;
 }
 
 // Everything between a pair of fences is code, so no inline rule may fire
@@ -1087,8 +1203,11 @@ bool MarkdownHighlighter::highlightMarkers(const QString &text) {
 // The heading is on this line, the underline that makes it one is on the next.
 void MarkdownHighlighter::highlightSetextContent(const QString &text) {
     const int level = setextUnderlineLevel(currentBlock().next().text());
-    if (level > 0 && isParagraphLine(text))
-        setFormat(0, text.length(), m_headingFormats[level - 1]);
+    if (level > 0 && isParagraphLine(text)) {
+        QTextCharFormat heading = m_headingFormats[level - 1];
+        heading.setProperty(SetextProperty, true);
+        setFormat(0, text.length(), heading);
+    }
 }
 
 void MarkdownHighlighter::scheduleSetextRefresh(int blockNumber) {

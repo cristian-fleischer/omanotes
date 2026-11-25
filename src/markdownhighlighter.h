@@ -6,6 +6,7 @@
 #include <QColor>
 #include <QHash>
 #include <QSet>
+#include <functional>
 #include <memory>
 #include <QRegularExpression>
 #include <QSyntaxHighlighter>
@@ -82,6 +83,10 @@ public:
     // Backend::inlineCodeRegions() finds what to draw it around.
     static constexpr int InlineCodeProperty = QTextFormat::UserProperty + 1;
 
+    // Marks a line styled as a heading for the underline below it, so the line
+    // can be redone when that underline stops being one.
+    static constexpr int SetextProperty = QTextFormat::UserProperty + 2;
+
     struct InlineMarkup {
         InlineKind kind;
         Span content;
@@ -119,6 +124,18 @@ public:
     // The ``` or ~~~ row itself. It belongs to the code slab, not to the
     // prose around it.
     static bool isFenceLine(const QString &text);
+
+    // The line a YAML header ends on, its closing `---` or `...`, or -1 when the
+    // text does not open with one. A note may also open with a thematic break,
+    // so `---` alone is not enough: what follows has to be a key on the very
+    // next line, and nothing but YAML down to the closing row.
+    // `nextLine` hands out the lines from the top and returns false at the end.
+    static int frontMatterEnd(const std::function<bool(QString *)> &nextLine);
+    static int frontMatterEnd(const QTextDocument *document);
+
+    // Whether a header starts or ends somewhere else depends on lines that were
+    // not edited, so the rows it gained or lost are redone from here.
+    Q_INVOKABLE void refreshFrontMatter();
 
     // Whether a family can draw box-drawing characters that join into
     // continuous rules: it must have the glyphs, and their ink must be at least
@@ -172,6 +189,7 @@ private slots:
 
 private:
     void rebuildFormats();
+    bool highlightFrontMatter(const QString &text);
     bool highlightFencedCode(const QString &text);
     int highlightCode(const QString &text, int languageIndex, int previousState);
     int languageIndexFor(const QString &language);
@@ -230,6 +248,9 @@ private:
     QList<int> m_pendingSetextBlocks;
     QList<int> m_restatedBlocks;
     int m_activeBlock = -1;
+    int m_frontMatterEnd = -1;
+    int m_frontMatterRefresh = -1;
+    int m_frontMatterRevision = -1;
     QSet<int> m_griddedRows;
     int m_revealedFirst = -1;
     int m_revealedLast = -1;
