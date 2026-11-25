@@ -264,6 +264,7 @@ private:
     void refreshWordCount();
     void scheduleWordCount();
     void applyDocumentTypography();
+    void formatAllBlocks(QTextCursor &cursor);
     void updateTableGrids();
     void reapplyTypographyToChange(int throughBlock = -1);
     void updateFrontMatterVisibility();
@@ -272,6 +273,9 @@ private:
     // typography pass does it once per block and passes it down.
     enum class BlockKind { Prose, Code, TableRow };
     BlockKind blockKind(const QTextBlock &block) const;
+    static QList<BlockKind> blockKindsOf(const QString &text);
+    // Set only while a text is being loaded.
+    QList<BlockKind> m_loadKinds;
     qreal lineHeightFor(BlockKind kind) const;
     qreal blockMarginFor(BlockKind kind) const;
     QPair<qreal, qreal> verticalMarginsFor(const QTextBlock &block, BlockKind kind) const;

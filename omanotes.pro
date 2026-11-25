@@ -11,6 +11,7 @@ HEADERS += \
     src/systemfonts.h \
     src/systemtheme.h \
     src/vaultmodel.h \
+    src/warmup.h \
     src/codesyntaxhighlighter.h \
     src/lexillacodehighlighter.h
 
@@ -22,6 +23,7 @@ SOURCES += \
     src/systemfonts.cpp \
     src/systemtheme.cpp \
     src/vaultmodel.cpp \
+    src/warmup.cpp \
     src/lexillacodehighlighter.cpp
 
 include(lexilla.pri)

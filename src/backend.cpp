@@ -1199,17 +1199,38 @@ void Backend::loadDocumentText(const QString &text) {
         const auto state = tableStateOf(text);
         m_highlighter->setTableState(-1, -1, state.first, state.second, false);
     }
+    // The text, its block formats and what is hidden of it go in as one edit, so
+    // the document is laid out once. Text first and formats after laid out every
+    // block three times, and laying out is most of what opening a long note is.
+    // The undo stack starts empty either way.
+    const bool undoEnabled = m_document->isUndoRedoEnabled();
+    m_document->setUndoRedoEnabled(false);
+    m_formattingTypography = true;
+    m_loadKinds = blockKindsOf(text);
+    QTextCursor cursor(m_document);
+    cursor.beginEditBlock();
     m_document->setPlainText(text);
     m_frontMatterEnd = MarkdownHighlighter::frontMatterEnd(m_document);
     m_frontMatterCollapsed = hasFrontMatter();
+    formatAllBlocks(cursor);
+    for (int number = 1; !m_sourceView && number <= m_frontMatterEnd; ++number)
+        m_document->findBlockByNumber(number).setVisible(false);
+    cursor.endEditBlock();
+    m_loadKinds.clear();
+    m_formattingTypography = false;
+    m_document->setUndoRedoEnabled(undoEnabled);
+    m_formattedBlockCount = m_document->blockCount();
     m_lastDocumentText = text;
     m_loading = false;
 
-    if (m_highlighter)
+    updateTableGrids();
+    if (m_highlighter) {
         m_highlighter->refreshFrontMatter();
-    applyDocumentTypography();
-    updateFrontMatterVisibility();
+        m_highlighter->takeRestatedBlocks();
+    }
     emit frontMatterChanged();
+    if (hasFrontMatter())
+        emit frontMatterLaidOut();
     m_wordCountTimer.stop();
     setWordCount(countWords(text));
     updateCurrentTitle(text);
@@ -1773,7 +1794,38 @@ bool Backend::isCodeBlock(const QTextBlock &block) const {
     return MarkdownHighlighter::isFenceLine(text);
 }
 
+// What each line of a text is, before there is a highlighted document to ask.
+QList<Backend::BlockKind> Backend::blockKindsOf(const QString &text) {
+    const QStringList lines = text.split(QLatin1Char('\n'));
+    int next = 0;
+    const int headerEnd = MarkdownHighlighter::frontMatterEnd([&lines, &next](QString *line) {
+        if (next >= lines.size())
+            return false;
+        *line = lines.at(next++);
+        return true;
+    });
+    QList<BlockKind> kinds;
+    kinds.reserve(lines.size());
+    bool fenced = false;
+    for (int number = 0; number < lines.size(); ++number) {
+        const QString &line = lines.at(number);
+        const bool fence = number > headerEnd
+            && (line.contains(QLatin1Char('`')) || line.contains(QLatin1Char('~')))
+            && MarkdownHighlighter::isFenceLine(line);
+        if (number <= headerEnd || fenced || fence)
+            kinds.append(BlockKind::Code);
+        else
+            kinds.append(MarkdownHighlighter::isTableRow(line) ? BlockKind::TableRow
+                                                               : BlockKind::Prose);
+        if (fence)
+            fenced = !fenced;
+    }
+    return kinds;
+}
+
 Backend::BlockKind Backend::blockKind(const QTextBlock &block) const {
+    if (!m_loadKinds.isEmpty())
+        return m_loadKinds.value(block.blockNumber(), BlockKind::Prose);
     if (isCodeBlock(block))
         return BlockKind::Code;
     if (MarkdownHighlighter::isTableRow(block.text()))
@@ -2060,6 +2112,23 @@ QString Backend::themeInlineCodeBackground() const {
     return MarkdownHighlighter::inlineCodeBackgroundFor(m_themeBackground, m_darkMode).name();
 }
 
+// One operation for the whole document, then a second pass over the few blocks
+// that want something else. Merging a format into every block on its own, out
+// of an edit block, laid the document out once per block: 660 ms on a 1,500-line
+// note, against 20 ms this way.
+void Backend::formatAllBlocks(QTextCursor &cursor) {
+    cursor.select(QTextCursor::Document);
+    QTextBlockFormat prose;
+    prose.setLineHeight(m_lineHeight, QTextBlockFormat::ProportionalHeight);
+    cursor.setBlockFormat(prose);
+
+    for (QTextBlock block = m_document->begin(); block.isValid(); block = block.next()) {
+        const BlockKind kind = blockKind(block);
+        if (kind != BlockKind::Prose && !hasWantedTypography(block, kind))
+            applyBlockTypography(cursor, block, kind);
+    }
+}
+
 void Backend::applyDocumentTypography() {
     if (!m_document)
         return;
@@ -2071,22 +2140,8 @@ void Backend::applyDocumentTypography() {
 
     m_formattingTypography = true;
     QTextCursor cursor(m_document);
-
-    // One operation for the whole document, then a second pass over the few
-    // blocks that want something else. Merging a format into every block on
-    // its own laid the document out once per block: 660 ms on a 1,500-line
-    // note, against 20 ms this way.
-    cursor.select(QTextCursor::Document);
-    QTextBlockFormat prose;
-    prose.setLineHeight(m_lineHeight, QTextBlockFormat::ProportionalHeight);
-    cursor.setBlockFormat(prose);
-
     cursor.beginEditBlock();
-    for (QTextBlock block = m_document->begin(); block.isValid(); block = block.next()) {
-        const BlockKind kind = blockKind(block);
-        if (kind != BlockKind::Prose && !hasWantedTypography(block, kind))
-            applyBlockTypography(cursor, block, kind);
-    }
+    formatAllBlocks(cursor);
     cursor.endEditBlock();
     m_formattingTypography = false;
 

@@ -16,9 +16,11 @@
 #include "systemfonts.h"
 #include "systemtheme.h"
 #include "vaultmodel.h"
+#include "warmup.h"
 
 int main(int argc, char *argv[]) {
     QApplication app(argc, argv);
+    std::thread graphics = warmGraphics();
     app.setApplicationName(QStringLiteral("omanotes"));
     app.setDesktopFileName(QStringLiteral("omanotes"));
     // A Wayland compositor takes the icon from the desktop file named above.
@@ -101,6 +103,8 @@ int main(int argc, char *argv[]) {
     engine->rootContext()->setContextProperty(QStringLiteral("vault"), &vault);
 
     engine->load(mainUrl);
+    if (graphics.joinable())
+        graphics.join();
     if (engine->rootObjects().isEmpty()) {
         qCritical() << "Could not load the Omanotes interface; resource available:"
                     << QFile::exists(QStringLiteral(":/Main.qml"));
