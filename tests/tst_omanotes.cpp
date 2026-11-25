@@ -1346,7 +1346,16 @@ private slots:
 
         const QStringList families = QFontDatabase::families();
         QVERIFY(!families.isEmpty());
-        const QString installed = families.constFirst();
+        // Any family but the default, which is stored as empty.
+        QString installed;
+        for (const QString &family : families) {
+            if (family != Backend::defaultEditorFontFamily()) {
+                installed = family;
+                break;
+            }
+        }
+        if (installed.isEmpty())
+            QSKIP("Needs a second font family");
 
         QVERIFY(QMetaObject::invokeMethod(window.data(), "setEditorFont",
                                           Q_ARG(QVariant, QVariant(installed))));
