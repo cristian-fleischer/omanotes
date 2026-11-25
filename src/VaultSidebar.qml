@@ -204,12 +204,18 @@ Rectangle {
 
         // Opening a note from the portal dialog, or from a recovered draft,
         // still moves the selection here.
-        function onCurrentPathChanged() {
-            var row = sidebar.vaultModel.rowForPath(sidebar.vaultModel.currentPath);
-            if (row >= 0) {
-                list.currentIndex = row;
-                list.positionViewAtIndex(row, ListView.Contain);
-            }
+        function onCurrentPathChanged() { sidebar.selectCurrent(); }
+    }
+
+    Component.onCompleted: selectCurrent()
+
+    function selectCurrent() {
+        if (!sidebar.vaultModel)
+            return;
+        var row = sidebar.vaultModel.rowForPath(sidebar.vaultModel.currentPath);
+        if (row >= 0) {
+            list.currentIndex = row;
+            list.positionViewAtIndex(row, ListView.Contain);
         }
     }
 
@@ -361,52 +367,59 @@ Rectangle {
                 rowTarget.dir = sidebar.vaultModel.relativeDirAt(row);
                 rowTarget.title = sidebar.vaultModel.titleAt(row);
                 rowTarget.hasDraft = sidebar.vaultModel.hasDraftAt(row);
-                if (sidebar.vaultModel.isDirectoryAt(row))
-                    folderMenu.popup(item);
-                else
-                    noteMenu.popup(item);
+                // Made on the first right-click: menu items are the only images in
+                // the window, and the first image loads every image plugin.
+                var menu = sidebar.vaultModel.isDirectoryAt(row) ? folderMenu : noteMenu;
+                menu.active = true;
+                menu.item.popup(item);
             }
 
-            Menu {
+            Loader {
                 id: folderMenu
-                objectName: "folderMenu"
-                MenuItem {
-                    text: "New note here"
-                    onTriggered: sidebar.newNoteRequested(rowTarget.dir)
+                active: false
+                sourceComponent: Menu {
+                    objectName: "folderMenu"
+                    MenuItem {
+                        text: "New note here"
+                        onTriggered: sidebar.newNoteRequested(rowTarget.dir)
+                    }
                 }
             }
 
-            Menu {
+            Loader {
                 id: noteMenu
-                objectName: "noteMenu"
-                MenuItem {
-                    text: "New note here"
-                    onTriggered: sidebar.newNoteRequested(rowTarget.dir)
-                }
-                MenuSeparator {}
-                MenuItem {
-                    text: "Discard unsaved changes\u2026"
-                    visible: rowTarget.hasDraft
-                    height: visible ? implicitHeight : 0
-                    onTriggered: sidebar.discardRequested(rowTarget.path, rowTarget.title)
-                }
-                Menu {
-                    title: "Move to"
+                active: false
+                sourceComponent: Menu {
+                    objectName: "noteMenu"
                     MenuItem {
-                        text: "Vault root"
-                        onTriggered: sidebar.moveRequested(rowTarget.path, "")
+                        text: "New note here"
+                        onTriggered: sidebar.newNoteRequested(rowTarget.dir)
                     }
-                    Repeater {
-                        model: sidebar.vaultModel ? sidebar.vaultModel.folders() : []
+                    MenuSeparator {}
+                    MenuItem {
+                        text: "Discard unsaved changes\u2026"
+                        visible: rowTarget.hasDraft
+                        height: visible ? implicitHeight : 0
+                        onTriggered: sidebar.discardRequested(rowTarget.path, rowTarget.title)
+                    }
+                    Menu {
+                        title: "Move to"
                         MenuItem {
-                            text: modelData
-                            onTriggered: sidebar.moveRequested(rowTarget.path, modelData)
+                            text: "Vault root"
+                            onTriggered: sidebar.moveRequested(rowTarget.path, "")
+                        }
+                        Repeater {
+                            model: sidebar.vaultModel ? sidebar.vaultModel.folders() : []
+                            MenuItem {
+                                text: modelData
+                                onTriggered: sidebar.moveRequested(rowTarget.path, modelData)
+                            }
                         }
                     }
-                }
-                MenuItem {
-                    text: "Delete\u2026"
-                    onTriggered: sidebar.deleteRequested(rowTarget.path, rowTarget.title)
+                    MenuItem {
+                        text: "Delete\u2026"
+                        onTriggered: sidebar.deleteRequested(rowTarget.path, rowTarget.title)
+                    }
                 }
             }
 

@@ -1,7 +1,6 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Controls.Material
-import QtQuick.Dialogs as Dialogs
 import QtQuick.Layouts
 import QtQuick.Window
 import "EditorMutations.js" as EditorMutations
@@ -46,17 +45,25 @@ ApplicationWindow {
                                         - Math.round(writerFontMetrics.averageCharacterWidth * 20)))),
         editorAreaWidth)
     property bool searchOpen: false
+    onSearchOpenChanged: if (win.searchOpen) searchBar.active = true
+    readonly property var searchField: searchBar.item ? searchBar.item.field : null
     property bool searchUpdating: false
     property var searchMatches: []
     property int searchMatchIndex: -1
     property bool replaceOpen: false
-    property bool sidebarVisible: true
+    property bool sidebarVisible: false
+    readonly property var sidebar: sidebarLoader.item
     // What the next launch gets, which is not always what this one shows. A
     // window handed a file opens as a reader with the sidebar out of the way,
     // and that is not a decision about the vault: only touching the sidebar is.
     property bool sidebarPreference: false
     property bool restoringState: true
-    onSidebarVisibleChanged: if (!win.restoringState) win.sidebarPreference = win.sidebarVisible
+    onSidebarVisibleChanged: {
+        if (win.sidebarVisible)
+            sidebarLoader.active = true;
+        if (!win.restoringState)
+            win.sidebarPreference = win.sidebarVisible;
+    }
     property int sidebarWidth: 260
     // Ctrl+= and Ctrl+- scale the writing surface only. The chrome keeps
     // following the desktop's text size, which is a different knob.
@@ -184,6 +191,13 @@ ApplicationWindow {
             backend.discardChanges();
         else
             backend.discardDraftFor(vault.urlForPath(path));
+    }
+
+    function confirmDiscard(path, title) {
+        var dialog = win.lazily(discardChangesDialog);
+        dialog.notePath = path;
+        dialog.noteTitle = title;
+        dialog.open();
     }
 
     function deleteNote(path) {
@@ -340,7 +354,7 @@ ApplicationWindow {
 
     function updateSearch() {
         var matches = [];
-        var query = searchField.text;
+        var query = win.searchField.text;
         if (query.length > 0) {
             var haystack = editor.text.toLocaleLowerCase();
             var needle = query.toLocaleLowerCase();
@@ -358,9 +372,9 @@ ApplicationWindow {
     function showSearchMatch() {
         var start = searchMatchIndex >= 0 ? searchMatches[searchMatchIndex] : -1;
         searchUpdating = true;
-        backend.setSearchHighlight(searchField.text, start);
+        backend.setSearchHighlight(win.searchField.text, start);
         if (start >= 0) {
-            editor.select(start, start + searchField.text.length);
+            editor.select(start, start + win.searchField.text.length);
             editorFlick.ensureCursorVisible();
         }
         searchUpdating = false;
@@ -396,8 +410,8 @@ ApplicationWindow {
         onActivated: {
             searchOpen = true;
             replaceOpen = true;
-            searchField.forceActiveFocus();
-            searchField.selectAll();
+            win.searchField.forceActiveFocus();
+            win.searchField.selectAll();
         }
     }
 
@@ -427,9 +441,7 @@ ApplicationWindow {
                 return;
             // Empty means the note in the editor. Splicing a path out of the
             // URL would lose every name with a space or a percent sign in it.
-            discardChangesDialog.notePath = "";
-            discardChangesDialog.noteTitle = backend.fileName;
-            discardChangesDialog.open();
+            win.confirmDiscard("", backend.fileName);
         }
     }
 
@@ -455,8 +467,7 @@ ApplicationWindow {
         sequence: "Ctrl+Shift+F"
         context: Qt.ApplicationShortcut
         onActivated: {
-            fontDialog.selectedFont = editor.font;
-            fontDialog.open();
+            win.lazily(fileDialogs).chooseFont(editor.font);
         }
     }
 
@@ -502,7 +513,7 @@ ApplicationWindow {
     Shortcut {
         sequence: "Ctrl+?"
         context: Qt.ApplicationShortcut
-        onActivated: shortcutsDialog.open()
+        onActivated: win.lazily(shortcutsDialog).open()
     }
 
     Shortcut {
@@ -552,8 +563,8 @@ ApplicationWindow {
         context: Qt.ApplicationShortcut
         onActivated: {
             searchOpen = true;
-            searchField.forceActiveFocus();
-            searchField.selectAll();
+            win.searchField.forceActiveFocus();
+            win.searchField.selectAll();
         }
     }
 
@@ -609,130 +620,148 @@ ApplicationWindow {
         }
 
         function onOpenDialogRequested() {
-            openFileDialog.open();
+            win.lazily(fileDialogs).openFile();
         }
 
         function onSaveDialogRequested(suggestedUrl) {
-            saveFileDialog.selectedFile = suggestedUrl;
-            saveFileDialog.open();
+            win.lazily(fileDialogs).saveFile(suggestedUrl);
         }
 
         function onExternalChangeDetected(deleted, locallyModified) {
-            externalChangeDialog.deleted = deleted;
-            externalChangeDialog.locallyModified = locallyModified;
-            externalChangeDialog.open();
+            var dialog = win.lazily(externalChangeDialog);
+            dialog.deleted = deleted;
+            dialog.locallyModified = locallyModified;
+            dialog.open();
         }
     }
 
-    Dialogs.FileDialog {
-        id: openFileDialog
-        title: "Open File"
-        fileMode: Dialogs.FileDialog.OpenFile
-        nameFilters: ["Markdown files (*.md *.markdown)", "All files (*)"]
-        onAccepted: win.requestOpen(selectedFile)
+    // Made when it is first opened, like everything below that a launch does not
+    // show: a dialog nobody asks for costs the launch its import, its widgets
+    // and the memory of both.
+    function lazily(loader) {
+        loader.active = true;
+        return loader.item;
     }
 
-    Dialogs.FileDialog {
-        id: saveFileDialog
-        title: "Save File"
-        fileMode: Dialogs.FileDialog.SaveFile
-        nameFilters: ["Markdown files (*.md *.markdown)", "All files (*)"]
-        onAccepted: backend.saveAs(selectedFile)
-        onRejected: backend.fileDialogCanceled()
+    Loader {
+        id: fileDialogs
+        objectName: "fileDialogs"
+        active: false
+        source: "FileDialogs.qml"
+
+        Connections {
+            target: fileDialogs.item
+            function onOpenAccepted(file) { win.requestOpen(file); }
+            function onSaveAccepted(file) { backend.saveAs(file); }
+            function onSaveRejected() { backend.fileDialogCanceled(); }
+            function onFontAccepted(family) { win.setEditorFont(family); }
+            function onFolderAccepted(folder) { vault.setRootUrl(folder); }
+        }
     }
 
-    Dialogs.FontDialog {
-        id: fontDialog
-        objectName: "fontDialog"
-        title: "Editor font"
-        // Only the family carries over. Size follows the zoom and the desktop
-        // text scale, and weight and style are what the Markdown means.
-        onAccepted: win.setEditorFont(selectedFont.family)
-    }
-
-    Dialogs.FolderDialog {
-        id: vaultRootDialog
-        title: "Choose the vault folder"
-        onAccepted: vault.setRootUrl(selectedFolder)
-    }
-
-    ExternalChangeDialog {
+    Loader {
         id: externalChangeDialog
-        darkMode: win.darkMode
-        textScale: win.textScale
-        textColor: win.textColor
-        strongTextColor: win.strongTextColor
-        containerWidth: win.width
-        containerHeight: win.height
+        objectName: "externalChangeDialogLoader"
+        active: false
+        sourceComponent: ExternalChangeDialog {
+            id: externalChangeDialogItem
+            objectName: "externalChangeDialog"
+            parent: win.contentItem
+            darkMode: win.darkMode
+            textScale: win.textScale
+            textColor: win.textColor
+            strongTextColor: win.strongTextColor
+            containerWidth: win.width
+            containerHeight: win.height
 
-        onKeepRequested: backend.keepExternalVersion()
-        onReloadRequested: backend.reloadFromDisk()
+            onKeepRequested: backend.keepExternalVersion()
+            onReloadRequested: backend.reloadFromDisk()
+        }
     }
 
-    Dialog {
+    Loader {
         id: discardChangesDialog
-        objectName: "discardChangesDialog"
-        property string notePath: ""
-        property string noteTitle: ""
-        modal: true
-        Overlay.modal: Rectangle { color: Qt.rgba(0, 0, 0, 0.55) }
-        title: "Discard changes"
-        standardButtons: Dialog.Cancel | Dialog.Ok
-        anchors.centerIn: parent
-        onAccepted: win.discardChanges(discardChangesDialog.notePath)
-        contentItem: Label {
-            text: "Throw away the unsaved changes to \u201c"
-                  + discardChangesDialog.noteTitle
-                  + "\u201d?\nThe note goes back to what is on disk."
-            lineHeight: 1.4
-        }
-    }
-
-    Dialog {
-        id: deleteNoteDialog
-        objectName: "deleteNoteDialog"
-        property string notePath: ""
-        property string noteTitle: ""
-        modal: true
-        Overlay.modal: Rectangle { color: Qt.rgba(0, 0, 0, 0.55) }
-        title: "Delete note"
-        standardButtons: Dialog.Cancel | Dialog.Ok
-        anchors.centerIn: parent
-        onAccepted: win.deleteNote(deleteNoteDialog.notePath)
-        contentItem: Label {
-            text: "Move \u201c" + deleteNoteDialog.noteTitle
-                  + "\u201d to the trash?\nYou can put it back from your file manager."
-            lineHeight: 1.4
-        }
-    }
-
-    Dialog {
-        id: shortcutsDialog
-        modal: true
-
-        // Material's default dim washes the page towards light grey, which on a
-        // dark palette reads as the dialog turning the lights on. Dim towards
-        // black in both themes, the way a modal is supposed to.
-        Overlay.modal: Rectangle {
-            color: Qt.rgba(0, 0, 0, 0.55)
-        }
-        title: "Keyboard shortcuts"
-        standardButtons: Dialog.Close
-        anchors.centerIn: parent
-        contentItem: Column {
-            spacing: 12
-
-            Label {
-                text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+Alt+N  New Note Where You Are\nDel  Delete the Note Picked in the Sidebar\nCtrl+L  Toggle Sidebar\nCtrl+Shift+L  Focus the Note Filter\nCtrl+= / Ctrl+-  Zoom the Text\nCtrl+0  Reset the Zoom\nCtrl+M  Full Window Width\nCtrl+U  Source View\nCtrl+Shift+T  Align the Table\nCtrl+Shift+R  Discard Unsaved Changes\nCtrl+Shift+F  Editor Font\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
-                lineHeight: 1.5
+        objectName: "discardChangesDialogLoader"
+        active: false
+        sourceComponent: Dialog {
+            id: discardChangesDialogItem
+            parent: win.contentItem
+            objectName: "discardChangesDialog"
+            property string notePath: ""
+            property string noteTitle: ""
+            modal: true
+            Overlay.modal: Rectangle { color: Qt.rgba(0, 0, 0, 0.55) }
+            title: "Discard changes"
+            standardButtons: Dialog.Cancel | Dialog.Ok
+            anchors.centerIn: parent
+            onAccepted: win.discardChanges(discardChangesDialogItem.notePath)
+            contentItem: Label {
+                text: "Throw away the unsaved changes to \u201c"
+                      + discardChangesDialogItem.noteTitle
+                      + "\u201d?\nThe note goes back to what is on disk."
+                lineHeight: 1.4
             }
+        }
+    }
 
-            // MIT requires the copyright notice to travel with the fork.
-            Label {
-                objectName: "attribution"
-                text: "Omanotes. Fork of OmaWrite by David Heinemeier Hansson, MIT."
-                color: win.mutedColor
-                font.pixelSize: win.scaledSize(11)
+    Loader {
+        id: deleteNoteDialog
+        objectName: "deleteNoteDialogLoader"
+        active: false
+        sourceComponent: Dialog {
+            id: deleteNoteDialogItem
+            parent: win.contentItem
+            objectName: "deleteNoteDialog"
+            property string notePath: ""
+            property string noteTitle: ""
+            modal: true
+            Overlay.modal: Rectangle { color: Qt.rgba(0, 0, 0, 0.55) }
+            title: "Delete note"
+            standardButtons: Dialog.Cancel | Dialog.Ok
+            anchors.centerIn: parent
+            onAccepted: win.deleteNote(deleteNoteDialogItem.notePath)
+            contentItem: Label {
+                text: "Move \u201c" + deleteNoteDialogItem.noteTitle
+                      + "\u201d to the trash?\nYou can put it back from your file manager."
+                lineHeight: 1.4
+            }
+        }
+    }
+
+    Loader {
+        id: shortcutsDialog
+        objectName: "shortcutsDialogLoader"
+        active: false
+        sourceComponent: Dialog {
+            id: shortcutsDialogItem
+            objectName: "shortcutsDialog"
+            parent: win.contentItem
+            modal: true
+
+            // Material's default dim washes the page towards light grey, which on a
+            // dark palette reads as the dialog turning the lights on. Dim towards
+            // black in both themes, the way a modal is supposed to.
+            Overlay.modal: Rectangle {
+                color: Qt.rgba(0, 0, 0, 0.55)
+            }
+            title: "Keyboard shortcuts"
+            standardButtons: Dialog.Close
+            anchors.centerIn: parent
+            contentItem: Column {
+                spacing: 12
+
+                Label {
+                    text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+Alt+N  New Note Where You Are\nDel  Delete the Note Picked in the Sidebar\nCtrl+L  Toggle Sidebar\nCtrl+Shift+L  Focus the Note Filter\nCtrl+= / Ctrl+-  Zoom the Text\nCtrl+0  Reset the Zoom\nCtrl+M  Full Window Width\nCtrl+U  Source View\nCtrl+Shift+T  Align the Table\nCtrl+Shift+R  Discard Unsaved Changes\nCtrl+Shift+F  Editor Font\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
+                    lineHeight: 1.5
+                }
+
+                // MIT requires the copyright notice to travel with the fork.
+                Label {
+                    objectName: "attribution"
+                    text: "Omanotes. Fork of OmaWrite by David Heinemeier Hansson, MIT."
+                    color: win.mutedColor
+                    font.pixelSize: win.scaledSize(11)
+                }
             }
         }
     }
@@ -741,45 +770,51 @@ ApplicationWindow {
         anchors.fill: parent
         spacing: 0
 
-        VaultSidebar {
-            id: sidebar
-            objectName: "vaultSidebar"
-            vaultModel: vault
+        // Made when it is first shown. A window opened to read one file may
+        // never show it.
+        Loader {
+            id: sidebarLoader
+            active: false
             visible: win.sidebarVisible
             Layout.fillHeight: true
-            Layout.preferredWidth: panelWidth
-            Layout.minimumWidth: minimumWidth
-            Layout.maximumWidth: maximumWidth
-            textScale: win.textScale
-            darkMode: win.darkMode
-            pageColor: win.pageColor
-            textColor: win.textColor
-            mutedColor: win.mutedColor
-            accentColor: backend.themeAccent
-            placeholderTitle: backend.placeholderTitle
-            documentModified: backend.modified
-            hasUntitledDraft: backend.modified && backend.untitled
+            Layout.preferredWidth: item ? item.panelWidth : 0
+            Layout.minimumWidth: item ? item.minimumWidth : 0
+            Layout.maximumWidth: item ? item.maximumWidth : 0
 
-            onNoteActivated: function(fileUrl) { win.openFromVault(fileUrl); }
-            onDraftActivated: editor.forceActiveFocus()
-            onNewNoteRequested: function(relativeDir) { win.createNote(relativeDir); }
-            onMoveRequested: function(path, relativeDir) { win.moveNote(path, relativeDir); }
-            onDiscardRequested: function(path, title) {
-                discardChangesDialog.notePath = path;
-                discardChangesDialog.noteTitle = title;
-                discardChangesDialog.open();
+            sourceComponent: VaultSidebar {
+                objectName: "vaultSidebar"
+                vaultModel: vault
+                textScale: win.textScale
+                darkMode: win.darkMode
+                pageColor: win.pageColor
+                textColor: win.textColor
+                mutedColor: win.mutedColor
+                accentColor: backend.themeAccent
+                placeholderTitle: backend.placeholderTitle
+                documentModified: backend.modified
+                hasUntitledDraft: backend.modified && backend.untitled
+
+                onNoteActivated: function(fileUrl) { win.openFromVault(fileUrl); }
+                onDraftActivated: editor.forceActiveFocus()
+                onNewNoteRequested: function(relativeDir) { win.createNote(relativeDir); }
+                onMoveRequested: function(path, relativeDir) { win.moveNote(path, relativeDir); }
+                onDiscardRequested: function(path, title) {
+                    win.confirmDiscard(path, title);
+                }
+                onDeleteRequested: function(path, title) {
+                    var dialog = win.lazily(deleteNoteDialog);
+                    dialog.notePath = path;
+                    dialog.noteTitle = title;
+                    dialog.open();
+                }
+                onRootChangeRequested: win.lazily(fileDialogs).chooseFolder()
+                onDismissed: {
+                    win.sidebarVisible = false;
+                    editor.forceActiveFocus();
+                }
+                panelWidth: win.sidebarWidth
+                onPanelWidthChanged: win.sidebarWidth = panelWidth
             }
-            onDeleteRequested: function(path, title) {
-                deleteNoteDialog.notePath = path;
-                deleteNoteDialog.noteTitle = title;
-                deleteNoteDialog.open();
-            }
-            onRootChangeRequested: vaultRootDialog.open()
-            onDismissed: {
-                win.sidebarVisible = false;
-                editor.forceActiveFocus();
-            }
-            onPanelWidthChanged: win.sidebarWidth = panelWidth
         }
 
         Item {
@@ -1698,7 +1733,10 @@ ApplicationWindow {
             }
 
 
-            Pane {
+            // Made when it is first opened, and kept.
+            Loader {
+                id: searchBar
+                active: false
                 anchors.top: parent.top
                 anchors.left: parent.left
                 anchors.right: parent.right
@@ -1708,144 +1746,148 @@ ApplicationWindow {
                 height: win.scaledSize(win.replaceOpen ? 104 : 56)
                 visible: win.searchOpen
                 z: 10
-                leftPadding: 16
-                rightPadding: 8
-                topPadding: 0
-                bottomPadding: 0
-                Material.elevation: 8
 
-                background: Rectangle {
-                    radius: 9
-                    color: win.darkMode ? "#22221f" : "#fffef2"
-                }
+                sourceComponent: Pane {
+                    property alias field: searchField
+                    leftPadding: 16
+                    rightPadding: 8
+                    topPadding: 0
+                    bottomPadding: 0
+                    Material.elevation: 8
 
-                RowLayout {
-                    anchors.fill: parent
-                    spacing: 8
+                    background: Rectangle {
+                        radius: 9
+                        color: win.darkMode ? "#22221f" : "#fffef2"
+                    }
 
-                    Item {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
+                    RowLayout {
+                        anchors.fill: parent
+                        spacing: 8
 
-                        TextInput {
-                            id: searchField
-                            anchors.left: parent.left
-                            anchors.right: parent.right
-                            anchors.top: parent.top
-                            height: win.replaceOpen ? parent.height / 2 : parent.height
-                            verticalAlignment: TextInput.AlignVCenter
-                            selectByMouse: true
-                            color: win.textColor
-                            selectionColor: win.selectionFill
-                            selectedTextColor: win.strongTextColor
-                            font.pixelSize: win.scaledSize(17)
-                            clip: true
-                            onTextChanged: win.updateSearch()
-                            Keys.onReturnPressed: function(event) {
-                                win.moveSearch((event.modifiers & Qt.ShiftModifier) ? -1 : 1);
-                                event.accepted = true;
+                        Item {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+
+                            TextInput {
+                                id: searchField
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                height: win.replaceOpen ? parent.height / 2 : parent.height
+                                verticalAlignment: TextInput.AlignVCenter
+                                selectByMouse: true
+                                color: win.textColor
+                                selectionColor: win.selectionFill
+                                selectedTextColor: win.strongTextColor
+                                font.pixelSize: win.scaledSize(17)
+                                clip: true
+                                onTextChanged: win.updateSearch()
+                                Keys.onReturnPressed: function(event) {
+                                    win.moveSearch((event.modifiers & Qt.ShiftModifier) ? -1 : 1);
+                                    event.accepted = true;
+                                }
+                                Keys.onEscapePressed: function(event) {
+                                    win.closeSearch();
+                                    event.accepted = true;
+                                }
                             }
-                            Keys.onEscapePressed: function(event) {
-                                win.closeSearch();
-                                event.accepted = true;
+
+                            TextInput {
+                                id: replaceField
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.bottom: parent.bottom
+                                height: parent.height / 2
+                                visible: win.replaceOpen
+                                verticalAlignment: TextInput.AlignVCenter
+                                color: win.textColor
+                                selectionColor: win.selectionFill
+                                selectedTextColor: win.strongTextColor
+                                font.pixelSize: win.scaledSize(17)
+                                Keys.onReturnPressed: replaceCurrentButton.clicked()
+                            }
+
+                            Label {
+                                anchors.verticalCenter: replaceField.verticalCenter
+                                text: "Replace with"
+                                visible: win.replaceOpen && replaceField.text.length === 0
+                                color: win.mutedColor
+                                font.pixelSize: win.scaledSize(17)
+                            }
+
+                            Label {
+                                anchors.verticalCenter: searchField.verticalCenter
+                                text: "Find"
+                                visible: searchField.text.length === 0
+                                color: win.mutedColor
+                                font.pixelSize: win.scaledSize(17)
                             }
                         }
 
-                        TextInput {
-                            id: replaceField
-                            anchors.left: parent.left
-                            anchors.right: parent.right
-                            anchors.bottom: parent.bottom
-                            height: parent.height / 2
+                        Label {
+                            Layout.preferredWidth: win.scaledSize(58)
+                            Layout.fillHeight: true
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                            text: win.searchMatches.length === 0
+                                ? "0/0"
+                                : (win.searchMatchIndex + 1) + "/" + win.searchMatches.length
+                            color: win.darkMode ? win.textColor : "#62635f"
+                            font.pixelSize: win.scaledSize(16)
+                        }
+
+                        Button {
+                            id: replaceCurrentButton
                             visible: win.replaceOpen
-                            verticalAlignment: TextInput.AlignVCenter
-                            color: win.textColor
-                            selectionColor: win.selectionFill
-                            selectedTextColor: win.strongTextColor
-                            font.pixelSize: win.scaledSize(17)
-                            Keys.onReturnPressed: replaceCurrentButton.clicked()
-                        }
-
-                        Label {
-                            anchors.verticalCenter: replaceField.verticalCenter
-                            text: "Replace with"
-                            visible: win.replaceOpen && replaceField.text.length === 0
-                            color: win.mutedColor
-                            font.pixelSize: win.scaledSize(17)
-                        }
-
-                        Label {
-                            anchors.verticalCenter: searchField.verticalCenter
-                            text: "Find"
-                            visible: searchField.text.length === 0
-                            color: win.mutedColor
-                            font.pixelSize: win.scaledSize(17)
-                        }
-                    }
-
-                    Label {
-                        Layout.preferredWidth: win.scaledSize(58)
-                        Layout.fillHeight: true
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                        text: win.searchMatches.length === 0
-                            ? "0/0"
-                            : (win.searchMatchIndex + 1) + "/" + win.searchMatches.length
-                        color: win.darkMode ? win.textColor : "#62635f"
-                        font.pixelSize: win.scaledSize(16)
-                    }
-
-                    Button {
-                        id: replaceCurrentButton
-                        visible: win.replaceOpen
-                        text: "Replace"
-                        onClicked: {
-                            if (win.searchMatchIndex < 0) return;
-                            var start = win.searchMatches[win.searchMatchIndex];
-                            EditorMutations.replaceRange(editor, start,
-                                                         start + searchField.text.length,
-                                                         replaceField.text);
-                            win.updateSearch();
-                        }
-                    }
-
-                    Button {
-                        visible: win.replaceOpen
-                        text: "All"
-                        onClicked: {
-                            if (searchField.text.length === 0) return;
-                            for (var i = win.searchMatches.length - 1; i >= 0; --i) {
-                                var start = win.searchMatches[i];
+                            text: "Replace"
+                            onClicked: {
+                                if (win.searchMatchIndex < 0) return;
+                                var start = win.searchMatches[win.searchMatchIndex];
                                 EditorMutations.replaceRange(editor, start,
                                                              start + searchField.text.length,
                                                              replaceField.text);
+                                win.updateSearch();
                             }
-                            win.updateSearch();
                         }
-                    }
 
-                    Rectangle {
-                        Layout.preferredWidth: 1
-                        Layout.preferredHeight: 34
-                        color: win.darkMode ? "#6f6f62" : "#d5d56e"
-                    }
+                        Button {
+                            visible: win.replaceOpen
+                            text: "All"
+                            onClicked: {
+                                if (searchField.text.length === 0) return;
+                                for (var i = win.searchMatches.length - 1; i >= 0; --i) {
+                                    var start = win.searchMatches[i];
+                                    EditorMutations.replaceRange(editor, start,
+                                                                 start + searchField.text.length,
+                                                                 replaceField.text);
+                                }
+                                win.updateSearch();
+                            }
+                        }
 
-                    SearchIconButton {
-                        iconName: "up"
-                        iconColor: win.darkMode ? win.textColor : "#62635f"
-                        onClicked: win.moveSearch(-1)
-                    }
+                        Rectangle {
+                            Layout.preferredWidth: 1
+                            Layout.preferredHeight: 34
+                            color: win.darkMode ? "#6f6f62" : "#d5d56e"
+                        }
 
-                    SearchIconButton {
-                        iconName: "down"
-                        iconColor: win.darkMode ? win.textColor : "#62635f"
-                        onClicked: win.moveSearch(1)
-                    }
+                        SearchIconButton {
+                            iconName: "up"
+                            iconColor: win.darkMode ? win.textColor : "#62635f"
+                            onClicked: win.moveSearch(-1)
+                        }
 
-                    SearchIconButton {
-                        iconName: "close"
-                        iconColor: win.darkMode ? win.textColor : "#62635f"
-                        onClicked: win.closeSearch()
+                        SearchIconButton {
+                            iconName: "down"
+                            iconColor: win.darkMode ? win.textColor : "#62635f"
+                            onClicked: win.moveSearch(1)
+                        }
+
+                        SearchIconButton {
+                            iconName: "close"
+                            iconColor: win.darkMode ? win.textColor : "#62635f"
+                            onClicked: win.closeSearch()
+                        }
                     }
                 }
             }
@@ -1879,7 +1921,6 @@ ApplicationWindow {
 
         var sidebarState = backend.sidebarState();
         win.sidebarWidth = sidebarState.width;
-        sidebar.panelWidth = sidebarState.width;
         win.sidebarPreference = sidebarState.visible;
         // Opening a file is asking to read it, so the document gets the window
         // and the vault waits to be asked for. `Ctrl+L` brings it out.

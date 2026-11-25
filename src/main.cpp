@@ -2,12 +2,15 @@
 #include <QApplication>
 #include <QIcon>
 #include <QQmlApplicationEngine>
+#include <QQmlComponent>
 #include <QQmlContext>
 #include <QQmlError>
 #include <QQuickStyle>
 #include <QUrl>
 #include <QQuickWindow>
 #include <QFile>
+
+#include <memory>
 
 #include "backend.h"
 #include "systemfonts.h"
@@ -18,7 +21,10 @@ int main(int argc, char *argv[]) {
     QApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("omanotes"));
     app.setDesktopFileName(QStringLiteral("omanotes"));
-    app.setWindowIcon(QIcon::fromTheme(QStringLiteral("omanotes")));
+    // A Wayland compositor takes the icon from the desktop file named above.
+    // Looking it up here as well costs the launch an icon theme.
+    if (!QGuiApplication::platformName().startsWith(QStringLiteral("wayland")))
+        app.setWindowIcon(QIcon::fromTheme(QStringLiteral("omanotes")));
 
     // QSettings resolves to ~/.config/omanotes/omanotes.conf. Leaving the
     // organisation domain unset keeps the path off omacom.io, so Omanotes
@@ -26,6 +32,13 @@ int main(int argc, char *argv[]) {
     app.setOrganizationName(QStringLiteral("omanotes"));
 
     QQuickStyle::setStyle(QStringLiteral("Material"));
+
+    // Qt reads and resolves the interface on a thread of its own. Started here,
+    // that runs alongside the work below instead of being waited for after it.
+    const QUrl mainUrl(QStringLiteral("qrc:/Main.qml"));
+    auto engine = std::make_unique<QQmlApplicationEngine>();
+    auto prefetch = std::make_unique<QQmlComponent>(engine.get(), mainUrl,
+                                                          QQmlComponent::Asynchronous);
 
     Backend backend(&app);
     VaultModel vault(&app);
@@ -79,23 +92,22 @@ int main(int argc, char *argv[]) {
     if (!backend.startedWithFile())
         vault.loadSettings();
 
-    QQmlApplicationEngine engine;
-    QObject::connect(&engine, &QQmlApplicationEngine::warnings, &app,
+    QObject::connect(engine.get(), &QQmlApplicationEngine::warnings, &app,
                      [](const QList<QQmlError> &warnings) {
         for (const QQmlError &warning : warnings)
             qWarning().noquote() << warning.toString();
     });
-    engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
-    engine.rootContext()->setContextProperty(QStringLiteral("vault"), &vault);
+    engine->rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+    engine->rootContext()->setContextProperty(QStringLiteral("vault"), &vault);
 
-    engine.load(QUrl(QStringLiteral("qrc:/Main.qml")));
-    if (engine.rootObjects().isEmpty()) {
+    engine->load(mainUrl);
+    if (engine->rootObjects().isEmpty()) {
         qCritical() << "Could not load the Omanotes interface; resource available:"
                     << QFile::exists(QStringLiteral(":/Main.qml"));
         return -1;
     }
 
-    auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().constFirst());
+    auto *window = qobject_cast<QQuickWindow *>(engine->rootObjects().constFirst());
     backend.setParentWindow(window);
     if (backend.startedWithFile()) {
         QObject::connect(window, &QQuickWindow::frameSwapped, &vault,
@@ -106,5 +118,9 @@ int main(int argc, char *argv[]) {
     if (backend.startedWithFile())
         backend.open(QUrl::fromLocalFile(backend.startupFile()));
 
-    return app.exec();
+    const int result = app.exec();
+    // Before the objects the interface is bound to.
+    prefetch.reset();
+    engine.reset();
+    return result;
 }

@@ -262,6 +262,9 @@ private slots:
         QScopedPointer<QObject> window(component.create());
         QVERIFY2(window, qPrintable(component.errorString()));
 
+        // It is made when it is first shown.
+        window->setProperty("sidebarVisible", true);
+        window->setProperty("sidebarPreference", false);
         QObject *sidebar = window->findChild<QObject *>(QStringLiteral("vaultSidebar"));
         QVERIFY(sidebar);
 
@@ -651,10 +654,25 @@ private slots:
         QScopedPointer<QObject> window(component.create());
         QVERIFY2(window, qPrintable(component.errorString()));
 
+        // It is made when it is first shown.
+        window->setProperty("sidebarVisible", true);
+        window->setProperty("sidebarPreference", false);
         QObject *list = window->findChild<QObject *>(QStringLiteral("vaultList"));
+        QVERIFY(list);
+        // So are the menus, each with its first right-click.
+        QVERIFY(!window->findChild<QObject *>(QStringLiteral("folderMenu")));
+        int folderRow = 0;
+        while (!vault.isDirectoryAt(folderRow))
+            ++folderRow;
+        const int firstNoteRow = vault.rowForPath(
+            QDir(vaultDirectory.path()).filePath(QStringLiteral("Note.md")));
+        for (int row : {folderRow, firstNoteRow}) {
+            QVERIFY(QMetaObject::invokeMethod(list, "openRowMenu", Q_ARG(QVariant, row),
+                                              Q_ARG(QVariant, QVariant::fromValue(list))));
+        }
         QObject *folderMenu = window->findChild<QObject *>(QStringLiteral("folderMenu"));
         QObject *noteMenu = window->findChild<QObject *>(QStringLiteral("noteMenu"));
-        QVERIFY(list && folderMenu && noteMenu);
+        QVERIFY(folderMenu && noteMenu);
 
         // A folder offers one thing, so its menu holds one row.
         QCOMPARE(folderMenu->property("count").toInt(), 1);
@@ -1342,6 +1360,11 @@ private slots:
         QCOMPARE(window->property("editorFontFamily").toString(),
                  Backend::defaultEditorFontFamily());
         QCOMPARE(view.value(QStringLiteral("fontFamily")).toString(), QString());
+        // Made with the first chooser that is opened, not with the window.
+        QVERIFY(!window->findChild<QObject *>(QStringLiteral("fontDialog")));
+        QObject *fileDialogs = window->findChild<QObject *>(QStringLiteral("fileDialogs"));
+        QVERIFY(fileDialogs);
+        QVERIFY(fileDialogs->setProperty("active", true));
         QVERIFY(window->findChild<QObject *>(QStringLiteral("fontDialog")));
 
         const QStringList families = QFontDatabase::families();
@@ -2653,6 +2676,10 @@ private slots:
         QScopedPointer<QObject> window(component.create());
         QVERIFY2(window, qPrintable(component.errorString()));
 
+        // It is made when it is first shown.
+        window->setProperty("sidebarVisible", true);
+        window->setProperty("sidebarPreference", false);
+        window->setProperty("sidebarVisible", false);
         QObject *sidebar = window->findChild<QObject *>(QStringLiteral("vaultSidebar"));
         QObject *list = window->findChild<QObject *>(QStringLiteral("vaultList"));
         QObject *filterField = window->findChild<QObject *>(QStringLiteral("vaultFilter"));
@@ -3445,6 +3472,54 @@ private slots:
         QSignalSpy openDialogSpy(&backend, &Backend::openDialogRequested);
         QVERIFY(QMetaObject::invokeMethod(openButton, "clicked"));
         QCOMPARE(openDialogSpy.count(), 1);
+    }
+
+    // What a launch does not show is made when it is asked for, so a mistake in
+    // any of it would only turn up then.
+    void makesDialogsWhenTheyAreAskedFor() {
+        Backend backend;
+        VaultModel vault;
+        QQmlEngine engine;
+        QStringList warnings;
+        connect(&engine, &QQmlEngine::warnings, this, [&warnings](const QList<QQmlError> &errors) {
+            for (const QQmlError &error : errors)
+                warnings.append(error.toString());
+        });
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        engine.rootContext()->setContextProperty(QStringLiteral("vault"), &vault);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(QFINDTESTDATA("../src/Main.qml")));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        for (const char *name : {"discardChangesDialog", "deleteNoteDialog", "externalChangeDialog",
+                                 "shortcutsDialog"}) {
+            QVERIFY(!window->findChild<QObject *>(QLatin1String(name)));
+            QObject *loader = window->findChild<QObject *>(QLatin1String(name)
+                                                           + QStringLiteral("Loader"));
+            QVERIFY2(loader, name);
+            QVariant dialog;
+            QVERIFY(QMetaObject::invokeMethod(window.data(), "lazily", Q_RETURN_ARG(QVariant, dialog),
+                                              Q_ARG(QVariant, QVariant::fromValue(loader))));
+            auto *object = dialog.value<QObject *>();
+            QVERIFY2(object, name);
+            QVERIFY(QMetaObject::invokeMethod(object, "open"));
+            QVERIFY(object->property("visible").toBool());
+            // Centred on the window, not on the loader that made it.
+            QCOMPARE(object->property("parent").value<QObject *>(),
+                     window->property("contentItem").value<QObject *>());
+            QVERIFY(QMetaObject::invokeMethod(object, "close"));
+        }
+
+        QVERIFY(!window->property("searchField").value<QObject *>());
+        window->setProperty("searchOpen", true);
+        QObject *searchField = window->property("searchField").value<QObject *>();
+        QVERIFY(searchField);
+        searchField->setProperty("text", QStringLiteral("x"));
+        window->setProperty("replaceOpen", true);
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "closeSearch"));
+
+        for (const QString &warning : std::as_const(warnings))
+            QVERIFY2(warning.contains(QStringLiteral("Binding loop")), qPrintable(warning));
     }
 
     void scalesTextWithDesktopTextSize() {
